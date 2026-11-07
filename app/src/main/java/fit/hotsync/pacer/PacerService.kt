@@ -7,10 +7,15 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
-import android.os.Build
+import android.media.AudioManager
+import android.media.ToneGenerator
 import android.os.IBinder
 import android.os.PowerManager
+import android.os.VibrationEffect
+import android.os.VibratorManager
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
+import fit.hotsync.pacer.workout.TargetStatus
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -23,29 +28,26 @@ import kotlinx.coroutines.launch
 /**
  * PacerService
  * ----------------------------------------------------------------------------
- * A started FOREGROUND SERVICE that houses the master race-clock loop.
+ * A started FOREGROUND SERVICE that houses the master clock loop for whichever
+ * mode is running: the race pacer ([PacerEngine]) or a structured workout
+ * ([WorkoutSession]). Started on demand from the UI, stopped when the run ends.
  *
  * Why a foreground service + wake lock?
- *   Wear OS aggressively dozes the CPU to save battery. For a 4+ hour race we
- *   need the clock thread to keep ticking with absolute precision even while the
- *   screen is off / in ambient. A foreground service earns us an exemption from
- *   background execution limits, and a PARTIAL_WAKE_LOCK keeps the CPU awake so
- *   the loop is never throttled or suspended.
+ *   Wear OS aggressively dozes the CPU to save battery. For a long run we need
+ *   the clock to keep ticking even while the screen is off / in ambient. A
+ *   foreground service exempts us from background limits, and a
+ *   PARTIAL_WAKE_LOCK keeps the CPU awake so the loop is never suspended.
  *
- * The loop itself does almost nothing expensive: it just calls
- * [PacerEngine.tick] on a cadence and sleeps. All timing maths are anchored to
- * elapsedRealtime inside the engine, so even if a tick is momentarily delayed
- * the displayed values self-correct on the next tick (no accumulated drift).
+ * All timing maths are anchored to elapsedRealtime inside the engines, so a
+ * delayed tick self-corrects on the next one (no accumulated drift).
  */
-class PacerService : Service() {
+class PacerService : Service(), WorkoutSession.Feedback {
 
     private var wakeLock: PowerManager.WakeLock? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var loopJob: Job? = null
+    private var tone: ToneGenerator? = null
 
-    // ------------------------------------------------------------------------
-    // Tick cadence — 5 Hz interactive, 1 Hz ambient (see requirement).
-    // ------------------------------------------------------------------------
     companion object {
         private const val CHANNEL_ID = "race_pacer_clock"
         private const val NOTIFICATION_ID = 1001
@@ -55,64 +57,115 @@ class PacerService : Service() {
 
         /** Ambient / Always-On refresh: 1 Hz -> 1000 ms between frames. */
         private const val INTERVAL_AMBIENT_MS = 1_000L
+
+        const val ACTION_START_RACE = "fit.hotsync.pacer.START_RACE"
+        const val ACTION_START_WORKOUT = "fit.hotsync.pacer.START_WORKOUT"
+
+        fun startRace(context: Context) = launch(context, ACTION_START_RACE)
+        fun startWorkout(context: Context) = launch(context, ACTION_START_WORKOUT)
+
+        fun stop(context: Context) {
+            context.stopService(Intent(context, PacerService::class.java))
+        }
+
+        private fun launch(context: Context, action: String) {
+            ContextCompat.startForegroundService(
+                context, Intent(context, PacerService::class.java).setAction(action)
+            )
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null // not a bound service
 
     override fun onCreate() {
         super.onCreate()
-
-        // 1) Promote to foreground with a persistent notification (required by the OS).
         createNotificationChannel()
-        startForeground(NOTIFICATION_ID, buildNotification())
 
-        // 2) Acquire a CPU wake lock so the loop can never be throttled/suspended.
-        //    PARTIAL_WAKE_LOCK keeps the CPU running while allowing the screen off.
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = powerManager.newWakeLock(
             PowerManager.PARTIAL_WAKE_LOCK,
             "RacePacer::MasterClockWakeLock"
         ).apply {
             setReferenceCounted(false)
-            // Timeout guards against a runaway lock; 5h comfortably covers a 4h+ race.
+            // Timeout guards against a runaway lock; 5h comfortably covers a long run.
             acquire(5 * 60 * 60 * 1000L /* 5 hours */)
         }
 
-        // 3) Arm the race clock and start the master loop.
-        PacerEngine.start()
-        startClockLoop()
+        WorkoutSession.feedback = this
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // START_STICKY: if the system ever kills us under memory pressure, restart
-        // the service so the race clock resumes as soon as possible.
+        when (intent?.action) {
+            ACTION_START_RACE -> {
+                startForeground(NOTIFICATION_ID, buildNotification("Race Pacer Active", "Race clock running"))
+                if (!PacerEngine.isRunning) PacerEngine.start()
+            }
+            ACTION_START_WORKOUT -> {
+                val name = WorkoutSession.ui.value.workout?.name ?: "Workout"
+                startForeground(NOTIFICATION_ID, buildNotification("Workout Active", name))
+                WorkoutSession.start()
+            }
+            else -> {
+                // Restarted by the system after the process died: the in-memory run is gone.
+                startForeground(NOTIFICATION_ID, buildNotification("HotSync", "Stopping"))
+                stopSelf()
+                return START_NOT_STICKY
+            }
+        }
+        startClockLoop()
         return START_STICKY
     }
 
-    /**
-     * The MASTER CLOCK LOOP. Runs off the main thread on the Default dispatcher.
-     * Each iteration recomputes the race frame and sleeps for the cadence that
-     * matches the current display mode (ambient vs interactive).
-     */
+    /** The MASTER CLOCK LOOP: ticks whichever mode is running. */
     private fun startClockLoop() {
-        loopJob?.cancel()
+        if (loopJob?.isActive == true) return
         loopJob = scope.launch {
             while (isActive) {
-                PacerEngine.tick()
-                val interval =
-                    if (PacerEngine.isAmbient) INTERVAL_AMBIENT_MS else INTERVAL_ACTIVE_MS
-                delay(interval)
+                if (PacerEngine.isRunning) PacerEngine.tick()
+                WorkoutSession.tick()
+                delay(if (PacerEngine.isAmbient) INTERVAL_AMBIENT_MS else INTERVAL_ACTIVE_MS)
             }
         }
     }
 
     override fun onDestroy() {
         PacerEngine.stop()
+        if (WorkoutSession.feedback === this) WorkoutSession.feedback = null
         loopJob?.cancel()
         scope.cancel()
+        tone?.release()
         wakeLock?.let { if (it.isHeld) it.release() }
         wakeLock = null
         super.onDestroy()
+    }
+
+    // ------------------------------------------------------------------------
+    // Workout feedback (haptic / sound). The visual bubble is drawn by the UI.
+    // ------------------------------------------------------------------------
+
+    override fun outOfRange(status: TargetStatus, settings: WorkoutSession.AlertSettings) {
+        // Two long pulses = too high/fast, three short = too low/slow
+        if (settings.haptic) vibrate(
+            if (status == TargetStatus.ABOVE) longArrayOf(0, 400, 200, 400)
+            else longArrayOf(0, 150, 120, 150, 120, 150)
+        )
+        if (settings.sound) beep(ToneGenerator.TONE_PROP_BEEP2)
+    }
+
+    override fun segmentChanged(settings: WorkoutSession.AlertSettings) {
+        if (settings.haptic) vibrate(longArrayOf(0, 600))
+        if (settings.sound) beep(ToneGenerator.TONE_PROP_ACK)
+    }
+
+    private fun vibrate(pattern: LongArray) {
+        val vm = getSystemService(VibratorManager::class.java) ?: return
+        vm.defaultVibrator.vibrate(VibrationEffect.createWaveform(pattern, -1))
+    }
+
+    private fun beep(toneType: Int) {
+        val generator = tone ?: runCatching { ToneGenerator(AudioManager.STREAM_ALARM, 100) }
+            .getOrNull()?.also { tone = it } ?: return
+        generator.startTone(toneType, 300)
     }
 
     // ------------------------------------------------------------------------
@@ -120,22 +173,18 @@ class PacerService : Service() {
     // ------------------------------------------------------------------------
 
     private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "Race Pacer Clock",
-                NotificationManager.IMPORTANCE_LOW // silent, no heads-up
-            ).apply {
-                description = "Keeps the race clock running precisely in the background."
-                setShowBadge(false)
-            }
-            val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(channel)
+        val channel = NotificationChannel(
+            CHANNEL_ID,
+            "Run Clock",
+            NotificationManager.IMPORTANCE_LOW // silent, no heads-up
+        ).apply {
+            description = "Keeps the run clock running precisely in the background."
+            setShowBadge(false)
         }
+        getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
     }
 
-    private fun buildNotification(): Notification {
-        // Tapping the notification returns to the pacer screen.
+    private fun buildNotification(title: String, text: String): Notification {
         val contentIntent = PendingIntent.getActivity(
             this,
             0,
@@ -144,11 +193,11 @@ class PacerService : Service() {
         )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Race Pacer Active")
-            .setContentText("Master clock running")
+            .setContentTitle(title)
+            .setContentText(text)
             .setSmallIcon(android.R.drawable.ic_menu_recent_history)
             .setContentIntent(contentIntent)
-            .setOngoing(true)          // user cannot swipe it away mid-race
+            .setOngoing(true)          // user cannot swipe it away mid-run
             .setSilent(true)
             .build()
     }

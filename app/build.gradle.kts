@@ -54,6 +54,8 @@ dependencies {
     implementation(libs.core.splashscreen)
 
     // ---- Added for HotSync Pacer ------------------------------------------
+    // Swipe-to-dismiss navigation between screens.
+    implementation("androidx.wear.compose:compose-navigation:1.3.1")
     // Ambient / Always-On Display support (AmbientLifecycleObserver).
     implementation("androidx.wear:wear:1.3.0")
     // collectAsStateWithLifecycle() used to observe the race snapshot.
@@ -62,6 +64,8 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     // ContextCompat.startForegroundService + NotificationCompat.
     implementation("androidx.core:core-ktx:1.13.1")
+
+    testImplementation("junit:junit:4.13.2")
 
     androidTestImplementation(platform(libs.compose.bom))
     androidTestImplementation(libs.ui.test.junit4)

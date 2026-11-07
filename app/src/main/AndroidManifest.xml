@@ -12,6 +12,9 @@
     <!-- "specialUse" foreground-service type for a long-running precision clock (API 34+). -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
+    <!-- Haptic alerts during structured workouts. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+
     <!-- Post the ongoing foreground notification (API 33+). -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
@@ -45,7 +48,7 @@
             android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="High-precision race pacing clock that must run for the full race duration with the screen off." />
+                android:value="High-precision run clock (race pacer and structured workouts) that must keep running for the whole run with the screen off." />
         </service>
 
     </application>
