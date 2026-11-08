@@ -19,3 +19,9 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+# --- Health Services ---------------------------------------------------------
+# Health Services talks to the system service with protobuf-lite messages, which
+# protobuf reads by FIELD NAME via reflection (e.g. "packageName_"). R8 renaming
+# them breaks every call with "Field packageName_ for ... not found".
+-keep class * extends com.google.protobuf.GeneratedMessageLite { *; }
+-keep class androidx.health.services.client.proto.** { *; }

@@ -21,6 +21,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -47,6 +48,7 @@ import fit.hotsync.pacer.workout.Duration
 import fit.hotsync.pacer.workout.Format
 import fit.hotsync.pacer.workout.TargetMode
 import fit.hotsync.pacer.workout.TargetStatus
+import kotlinx.coroutines.launch
 import kotlin.math.cos
 import kotlin.math.sin
 
@@ -62,6 +64,7 @@ fun WorkoutRunScreen(ambient: Boolean, onEnded: () -> Unit, onDiscard: () -> Uni
     LaunchedEffect(ui.ended) { if (ui.ended) onEnded() }
 
     val pager = rememberPagerState { PAGE_COUNT }
+    val scope = rememberCoroutineScope()
     Box(Modifier.fillMaxSize().background(HsColors.Background)) {
         if (ambient) {
             GaugePage(ui, ambient = true)
@@ -69,7 +72,11 @@ fun WorkoutRunScreen(ambient: Boolean, onEnded: () -> Unit, onDiscard: () -> Uni
             HorizontalPager(state = pager, modifier = Modifier.fillMaxSize()) { page ->
                 when (page) {
                     0 -> GaugePage(ui, ambient = false)
-                    else -> ControlsPage(ui, onDiscard)
+                    else -> ControlsPage(
+                        ui,
+                        onDiscard = onDiscard,
+                        backToMain = { scope.launch { pager.animateScrollToPage(0) } },
+                    )
                 }
             }
             HorizontalPageIndicator(
@@ -88,6 +95,13 @@ private fun PagerState.asIndicatorState() = object : PageIndicatorState {
 
 // ----------------------------------------------------------------------------
 // Page 0: gauge + numbers + reserved alert bubble
+//
+//            ╭── gauge ──╮
+//              ♥ 132              <- primary: HR (HR workout) or pace (pace workout)
+//         5:48        4:12        <- other metric · time/distance left (large)
+//         PACE        LEFT
+//            Warm Up  1/3         <- segment + set
+//          [ HR HIGH ↑ ]          <- reserved alert bubble
 // ----------------------------------------------------------------------------
 
 @Composable
@@ -95,15 +109,15 @@ private fun GaugePage(ui: WorkoutSession.Ui, ambient: Boolean) {
     val snap = ui.snapshot ?: return
     val workout = ui.workout ?: return
     val hrMode = workout.mode == TargetMode.HR
-    val textColor = if (ambient) Color.White else Color.White
+    val textColor = Color.White
     val dim = if (ambient) Color.Gray else HsColors.Dim
 
     val hrText = ui.heartRate?.toString() ?: "--"
     val paceText = Format.pace(ui.paceSecPerKm)
     val segment = snap.segment
 
-    // Right-hand value: time/distance left, or elapsed for open segments
-    val rightText = when (val d = segment?.duration) {
+    // Time/distance left in the segment, or elapsed for open segments
+    val rightText = when (segment?.duration) {
         is Duration.Time -> Format.countdown(snap.remainingMs ?: 0)
         is Duration.Distance -> Format.distance(snap.remainingM ?: 0.0)
         Duration.Open -> Format.duration(snap.segmentElapsedMs)
@@ -111,7 +125,7 @@ private fun GaugePage(ui: WorkoutSession.Ui, ambient: Boolean) {
     }
     val rightCaption = when (segment?.duration) {
         is Duration.Time, is Duration.Distance -> "LEFT"
-        Duration.Open -> "LAP"
+        Duration.Open -> "LAP TIME"
         null -> "TOTAL"
     }
 
@@ -120,39 +134,46 @@ private fun GaugePage(ui: WorkoutSession.Ui, ambient: Boolean) {
 
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.fillMaxSize().padding(top = 34.dp, bottom = 14.dp, start = 10.dp, end = 10.dp),
+            modifier = Modifier.fillMaxSize().padding(top = 30.dp, bottom = 12.dp, start = 14.dp, end = 14.dp),
         ) {
-            // Primary metric: HR in HR workouts, pace in pace workouts
-            Text(
-                if (hrMode) "♥" else "PACE",
-                color = if (ambient) dim else HsColors.Red.takeIf { hrMode } ?: dim,
-                fontSize = if (hrMode) 16.sp else 11.sp,
-            )
-            Text(
-                if (hrMode) hrText else paceText,
-                color = textColor, fontSize = 54.sp, fontWeight = FontWeight.Black,
-                fontFamily = FontFamily.Monospace, lineHeight = 56.sp,
-            )
+            // Primary metric
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (hrMode) {
+                    Text("♥", color = if (ambient) dim else HsColors.Red, fontSize = 22.sp)
+                    Spacer(Modifier.width(4.dp))
+                }
+                Text(
+                    if (hrMode) hrText else paceText,
+                    color = textColor, fontSize = 52.sp, fontWeight = FontWeight.Black, lineHeight = 54.sp,
+                )
+                if (!hrMode) {
+                    Spacer(Modifier.width(3.dp))
+                    Text("/km", color = dim, fontSize = 13.sp)
+                }
+            }
 
-            // Left: the other metric · Centre: segment name + set · Right: time/distance left
+            // Secondary row: the other metric and time/distance left, both large
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
+                horizontalArrangement = Arrangement.SpaceEvenly,
             ) {
-                SideValue(if (hrMode) paceText else hrText, if (hrMode) "PACE" else "HR", textColor, dim)
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.weight(1f).padding(horizontal = 4.dp),
-                ) {
-                    Text(
-                        segment?.label ?: "Complete",
-                        color = textColor, fontSize = 16.sp, fontWeight = FontWeight.Bold,
-                        maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
-                    )
-                    Text(segment?.setText ?: segment?.target?.zoneName ?: "", color = dim, fontSize = 13.sp, maxLines = 1)
+                BigValue(if (hrMode) paceText else hrText, if (hrMode) "PACE" else "♥ HR", textColor, dim)
+                BigValue(rightText, rightCaption, textColor, dim)
+            }
+
+            // Segment name + set count (or zone)
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
+                Text(
+                    segment?.label ?: "Complete",
+                    color = textColor, fontSize = 16.sp, fontWeight = FontWeight.Bold,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                val sub = segment?.setText ?: segment?.target?.zoneName
+                if (sub != null) {
+                    Spacer(Modifier.width(6.dp))
+                    Text(sub, color = dim, fontSize = 14.sp, maxLines = 1)
                 }
-                SideValue(rightText, rightCaption, textColor, dim)
             }
 
             Spacer(Modifier.weight(1f))
@@ -164,10 +185,10 @@ private fun GaugePage(ui: WorkoutSession.Ui, ambient: Boolean) {
 }
 
 @Composable
-private fun SideValue(value: String, caption: String, color: Color, dim: Color) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(62.dp)) {
-        Text(value, color = color, fontSize = 18.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, maxLines = 1)
-        Text(caption, color = dim, fontSize = 10.sp)
+private fun BigValue(value: String, caption: String, color: Color, dim: Color) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(value, color = color, fontSize = 28.sp, fontWeight = FontWeight.Bold, maxLines = 1, lineHeight = 30.sp)
+        Text(caption, color = dim, fontSize = 11.sp)
     }
 }
 
@@ -214,12 +235,15 @@ private fun WorkoutGauge(position: Double?, ambient: Boolean, hasTarget: Boolean
         val third = sweep / 3
         val gap = 2f
 
-        if (ambient || !hasTarget) {
+        if (!hasTarget) {
             drawArc(HsColors.Track, start, sweep, false, topLeft, arcSize, style = Stroke(strokeWidth / 3))
         } else {
-            drawArc(HsColors.Red, start, third - gap, false, topLeft, arcSize, style = Stroke(strokeWidth))
-            drawArc(HsColors.Green, start + third + gap / 2, third - gap, false, topLeft, arcSize, style = Stroke(strokeWidth))
-            drawArc(HsColors.Red, start + 2 * third + gap, third - gap, false, topLeft, arcSize, style = Stroke(strokeWidth))
+            // Always-on (wrist turned away): same gauge, thinner and dimmer to protect the screen
+            val w = if (ambient) strokeWidth / 2 else strokeWidth
+            val a = if (ambient) 0.6f else 1f
+            drawArc(HsColors.Red.copy(alpha = a), start, third - gap, false, topLeft, arcSize, style = Stroke(w))
+            drawArc(HsColors.Green.copy(alpha = a), start + third + gap / 2, third - gap, false, topLeft, arcSize, style = Stroke(w))
+            drawArc(HsColors.Red.copy(alpha = a), start + 2 * third + gap, third - gap, false, topLeft, arcSize, style = Stroke(w))
         }
 
         if (position != null && hasTarget) {
@@ -245,7 +269,7 @@ private fun WorkoutGauge(position: Double?, ambient: Boolean, hasTarget: Boolean
  * Saving only from pause means a stray tap can never end a run.
  */
 @Composable
-private fun ControlsPage(ui: WorkoutSession.Ui, onDiscard: () -> Unit) {
+private fun ControlsPage(ui: WorkoutSession.Ui, onDiscard: () -> Unit, backToMain: () -> Unit) {
     val snap = ui.snapshot
     val paused = snap?.isPaused == true
     val complete = snap?.isComplete == true
@@ -270,7 +294,7 @@ private fun ControlsPage(ui: WorkoutSession.Ui, onDiscard: () -> Unit) {
                 item {
                     Chip(
                         modifier = Modifier.fillMaxWidth(),
-                        onClick = { WorkoutSession.lap() },
+                        onClick = { WorkoutSession.lap(); backToMain() },
                         label = { Text("Lap") },
                         secondaryLabel = { Text(snap?.next?.let { "Next: ${it.label}" } ?: "End segment") },
                         colors = ChipDefaults.secondaryChipColors(),
@@ -281,7 +305,7 @@ private fun ControlsPage(ui: WorkoutSession.Ui, onDiscard: () -> Unit) {
             item {
                 Chip(
                     modifier = Modifier.fillMaxWidth(),
-                    onClick = { WorkoutSession.togglePause() },
+                    onClick = { WorkoutSession.togglePause(); backToMain() },
                     label = { Text("Resume", fontWeight = FontWeight.Bold) },
                     colors = ChipDefaults.primaryChipColors(backgroundColor = HsColors.Green),
                 )

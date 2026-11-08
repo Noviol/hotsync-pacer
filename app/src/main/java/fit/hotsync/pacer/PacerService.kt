@@ -17,6 +17,8 @@ import android.os.VibrationEffect
 import android.os.VibratorManager
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
+import androidx.wear.ongoing.OngoingActivity
+import androidx.wear.ongoing.Status
 import fit.hotsync.pacer.sensors.ExerciseSensors
 import fit.hotsync.pacer.workout.TargetStatus
 import kotlinx.coroutines.CoroutineScope
@@ -217,13 +219,24 @@ class PacerService : Service(), WorkoutSession.Feedback {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        return NotificationCompat.Builder(this, CHANNEL_ID)
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(text)
-            .setSmallIcon(android.R.drawable.ic_menu_recent_history)
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentIntent(contentIntent)
+            .setCategory(NotificationCompat.CATEGORY_WORKOUT)
             .setOngoing(true)          // user cannot swipe it away mid-run
             .setSilent(true)
+
+        // Ongoing activity: a tappable icon on the watch face, and Wear OS returns
+        // to the run (instead of the watch face) when the screen wakes.
+        OngoingActivity.Builder(applicationContext, NOTIFICATION_ID, builder)
+            .setStaticIcon(R.drawable.ic_launcher_foreground)
+            .setTouchIntent(contentIntent)
+            .setStatus(Status.Builder().addTemplate(text).build())
             .build()
+            .apply(applicationContext)
+
+        return builder.build()
     }
 }

@@ -82,7 +82,9 @@ object ExerciseSensors {
             }
             m.getData(DataType.DISTANCE_TOTAL)?.let {
                 WorkoutSession.distanceM = it.total
-                pace.add(now, it.total)
+                // Time the distance was measured (updates arrive in batches), on the elapsedRealtime clock
+                val measuredAt = now - (System.currentTimeMillis() - it.end.toEpochMilli())
+                pace.add(measuredAt.coerceAtMost(now), it.total)
             }
             m.getData(DataType.LOCATION).lastOrNull()?.let {
                 val v = it.value
@@ -91,7 +93,7 @@ object ExerciseSensors {
             m.getData(DataType.ABSOLUTE_ELEVATION).lastOrNull()?.let { elevationM = it.value }
             m.getData(DataType.STEPS_PER_MINUTE).lastOrNull()?.let { cadenceSpm = it.value.toInt() }
 
-            WorkoutSession.paceSecPerKm = pace.paceSecPerKm(now)
+            WorkoutSession.paceSecPerKm = pace.displayPace(now)
             // Drop a stale HR (watch off-wrist / sensor gap) rather than showing an old number
             if (now - lastHrAtMs > 10_000) WorkoutSession.heartRate = null
         }

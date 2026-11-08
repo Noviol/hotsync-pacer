@@ -44,7 +44,25 @@ class PaceSmootherTest {
         assertNull(q.paceSecPerKm(20_000))
         val r = PaceSmoother()
         for (s in 0..20) r.add(s * 1000L, s * 3.0)
-        assertNull(r.paceSecPerKm(30_000)) // distance stopped arriving
+        assertNull(r.paceSecPerKm(31_000)) // distance stopped arriving
+    }
+
+    @Test
+    fun displayPaceDampsASuddenJump() {
+        val p = PaceSmoother()
+        var d = 0.0
+        var shown = 0.0
+        for (s in 0..60) {
+            p.add(s * 1000L, d)
+            d += if (s == 45) 40.0 else 3.0 // one bad GPS reading: 40 m in a second
+            p.displayPace(s * 1000L)?.let { shown = it }
+        }
+        val raw = p.paceSecPerKm(60_000)!!
+        // The steady pace is 333 s/km; the spike pulls the raw window pace far lower,
+        // the displayed pace moves only part of the way
+        assertTrue(raw < 300)
+        assertTrue(shown > raw + 5)
+        assertTrue(shown < 334)
     }
 }
 

@@ -65,6 +65,8 @@ dependencies {
     implementation("com.google.guava:guava:33.3.1-android") // ListenableFuture type used by Health Services APIs
     // Queued, retrying uploads of finished runs (works after reconnecting).
     implementation("androidx.work:work-runtime-ktx:2.10.0")
+    // Ongoing activity: workout icon on the watch face, return to the run on wrist raise.
+    implementation("androidx.wear:wear-ongoing:1.0.0")
     // Swipe-to-dismiss navigation between screens.
     implementation("androidx.wear.compose:compose-navigation:1.3.1")
     // Ambient / Always-On Display support (AmbientLifecycleObserver).
