@@ -42,7 +42,8 @@ class UploadWorker(context: Context, params: WorkerParameters) : CoroutineWorker
             var result = api.uploadActivity(
                 token = token,
                 file = file.readBytes(),
-                filename = "$id.tcx.gz",
+                filename = "$id." + if (file.name.endsWith(".fit")) "fit" else "tcx.gz",
+                data = UploadQueue.dataFile(ctx, id).takeIf { it.exists() }?.readBytes(),
                 externalId = id,
                 // For calendar runs let the server use the event title (same as the webhook will)
                 name = if (meta.eventId != null) null else meta.name,

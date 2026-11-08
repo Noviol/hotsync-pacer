@@ -55,6 +55,23 @@ object ExerciseSensors {
     @Volatile var cadenceSpm: Int? = null
         private set
 
+    /**
+     * Running dynamics (Garmin-style form metrics). Health Services 1.0 has no
+     * constants for these, so they're matched by name from the watch's supported
+     * types. Units as reported by Health Services.
+     */
+    data class Dynamics(
+        val groundContactMs: Double? = null,   // Ground contact time
+        val verticalOscillationCm: Double? = null,
+        val verticalRatioPct: Double? = null,
+        val strideLengthM: Double? = null,
+    )
+    @Volatile var dynamics = Dynamics()
+        private set
+
+    private val DYNAMICS_NAMES = setOf("Ground Contact Time", "Vertical Oscillation", "Vertical Ratio", "Stride Length")
+    private var loggedDynamics = false
+
     private lateinit var client: ExerciseClient
     private var dataTypes: Set<DataType<*, *>> = emptySet()
     private var gpsEnabled = false
@@ -92,6 +109,26 @@ object ExerciseSensors {
             }
             m.getData(DataType.ABSOLUTE_ELEVATION).lastOrNull()?.let { elevationM = it.value }
             m.getData(DataType.STEPS_PER_MINUTE).lastOrNull()?.let { cadenceSpm = it.value.toInt() }
+
+            // Running dynamics: generic sample points, matched by data type name
+            var d = dynamics
+            for (point in m.sampleDataPoints) {
+                val v = (point.value as? Number)?.toDouble() ?: continue
+                d = when (point.dataType.name) {
+                    "Ground Contact Time" -> d.copy(groundContactMs = v)
+                    "Vertical Oscillation" -> d.copy(verticalOscillationCm = v)
+                    "Vertical Ratio" -> d.copy(verticalRatioPct = v)
+                    "Stride Length" -> d.copy(strideLengthM = v)
+                    else -> d
+                }
+            }
+            if (d != dynamics) {
+                if (!loggedDynamics) {
+                    Log.i(TAG, "First running dynamics: $d")  // Confirms units on a real run
+                    loggedDynamics = true
+                }
+                dynamics = d
+            }
 
             WorkoutSession.paceSecPerKm = pace.displayPace(now)
             // Drop a stale HR (watch off-wrist / sensor gap) rather than showing an old number
@@ -138,6 +175,7 @@ object ExerciseSensors {
             DataType.STEPS_PER_MINUTE,
         )
         if (gpsAllowed) wanted += DataType.LOCATION
+        wanted += supported.filter { it.name in DYNAMICS_NAMES }
         dataTypes = wanted.filter { it in supported }.toSet()
         Log.i(TAG, "RUNNING supports: ${supported.joinToString { it.name }}")
         Log.i(TAG, "Using: ${dataTypes.joinToString { it.name }}")
@@ -148,6 +186,8 @@ object ExerciseSensors {
         location = null
         elevationM = null
         cadenceSpm = null
+        dynamics = Dynamics()
+        loggedDynamics = false
         lastHrAtMs = 0L
         pace.reset()
     }

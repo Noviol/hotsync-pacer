@@ -1,11 +1,11 @@
 package fit.hotsync.pacer
 
 import android.content.Context
-import android.os.Build
 import android.os.SystemClock
 import fit.hotsync.pacer.recording.LapInfo
 import fit.hotsync.pacer.recording.RunRecording
-import fit.hotsync.pacer.recording.TcxWriter
+import fit.hotsync.pacer.recording.FitWriter
+import fit.hotsync.pacer.recording.RunDataJson
 import fit.hotsync.pacer.recording.TrackPoint
 import fit.hotsync.pacer.sensors.ExerciseSensors
 import fit.hotsync.pacer.upload.UploadQueue
@@ -142,6 +142,7 @@ object WorkoutSession {
         if (e.isPaused || t - lastPointAtMs < 1_000) return
         lastPointAtMs = t
         val loc = ExerciseSensors.location?.takeIf { t - it.atElapsedMs < 5_000 }
+        val dyn = ExerciseSensors.dynamics
         rec.add(
             TrackPoint(
                 epochMs = System.currentTimeMillis(),
@@ -152,6 +153,10 @@ object WorkoutSession {
                 heartRate = heartRate,
                 cadenceSpm = ExerciseSensors.cadenceSpm,
                 segment = e.index,
+                groundContactMs = dyn.groundContactMs,
+                verticalOscillationCm = dyn.verticalOscillationCm,
+                verticalRatioPct = dyn.verticalRatioPct,
+                strideLengthM = dyn.strideLengthM,
             )
         )
     }
@@ -185,7 +190,8 @@ object WorkoutSession {
     }
 
     /**
-     * After [end]: write the run as TCX and queue it for Strava.
+     * After [end]: queue the run for upload. Strava gets a FIT file WITHOUT heart
+     * rate (the user keeps HR private from Strava); HotSync gets the full data.
      * Returns the upload id, or null if nothing was recorded.
      */
     @Synchronized
@@ -198,10 +204,11 @@ object WorkoutSession {
         val laps = e.segments.map { seg ->
             LapInfo(seg.index, seg.label + (seg.setText?.let { " $it" } ?: ""), e.completed.getOrNull(seg.index)?.durationMs)
         }
-        val tcx = TcxWriter.write(rec, laps, Build.MODEL ?: "Wear OS watch")
+        val fit = FitWriter.write(rec, laps, includeHeartRate = false)
+        val full = RunDataJson.write(rec, laps)
         val id = "hotsync-${rec.startEpochMs}"
         UploadQueue.enqueue(
-            context, id, tcx,
+            context, id, fit, full,
             UploadQueue.Meta(
                 name = ui.workout?.name ?: "Run",
                 eventId = ui.eventId,

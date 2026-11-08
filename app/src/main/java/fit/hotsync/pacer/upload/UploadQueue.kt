@@ -17,9 +17,12 @@ import java.util.concurrent.TimeUnit
 import java.util.zip.GZIPOutputStream
 
 /**
- * Finished runs waiting to go to Strava (via hotsync.fit). Each run is saved as
- * files/uploads/<id>.tcx.gz plus <id>.json, so nothing is lost if the watch is
- * offline or the app restarts; [UploadWorker] sends it when there's a connection.
+ * Finished runs waiting to go to hotsync.fit (and on to Strava). Each run is saved as
+ *   files/uploads/<id>.fit           FIT file for Strava (no heart rate)
+ *   files/uploads/<id>.data.json.gz  full data kept by HotSync (HR, cadence, dynamics)
+ *   files/uploads/<id>.json          metadata
+ * so nothing is lost if the watch is offline or the app restarts; [UploadWorker]
+ * sends it when there's a connection. (Older builds queued <id>.tcx.gz; still sent.)
  */
 object UploadQueue {
 
@@ -39,12 +42,18 @@ object UploadQueue {
     val items: StateFlow<Map<String, Item>> = _items.asStateFlow()
 
     fun dir(context: Context) = File(context.filesDir, "uploads").apply { mkdirs() }
-    fun file(context: Context, id: String) = File(dir(context), "$id.tcx.gz")
+    /** The file for Strava: FIT, or a legacy TCX queued by an older build. */
+    fun file(context: Context, id: String): File {
+        val fit = File(dir(context), "$id.fit")
+        return if (fit.exists()) fit else File(dir(context), "$id.tcx.gz").takeIf { it.exists() } ?: fit
+    }
+    fun dataFile(context: Context, id: String) = File(dir(context), "$id.data.json.gz")
     private fun metaFile(context: Context, id: String) = File(dir(context), "$id.json")
 
     /** Save a finished run and schedule its upload. */
-    fun enqueue(context: Context, id: String, tcx: String, meta: Meta) {
-        GZIPOutputStream(file(context, id).outputStream()).use { it.write(tcx.toByteArray()) }
+    fun enqueue(context: Context, id: String, fit: ByteArray, dataJson: String, meta: Meta) {
+        File(dir(context), "$id.fit").writeBytes(fit)
+        GZIPOutputStream(dataFile(context, id).outputStream()).use { it.write(dataJson.toByteArray()) }
         metaFile(context, id).writeText(
             JSONObject().put("name", meta.name).put("event_id", meta.eventId).put("event_date", meta.eventDate).toString()
         )
@@ -75,6 +84,7 @@ object UploadQueue {
     /** Uploaded (or permanently rejected): remove the local copy. */
     fun remove(context: Context, id: String) {
         file(context, id).delete()
+        dataFile(context, id).delete()
         metaFile(context, id).delete()
     }
 

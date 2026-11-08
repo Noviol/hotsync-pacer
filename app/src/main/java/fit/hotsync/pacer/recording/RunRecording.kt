@@ -10,6 +10,10 @@ data class TrackPoint(
     val heartRate: Int?,
     val cadenceSpm: Int?,   // steps per minute
     val segment: Int,       // engine segment index; == segment count after the workout completes
+    val groundContactMs: Double? = null,
+    val verticalOscillationCm: Double? = null,
+    val verticalRatioPct: Double? = null,
+    val strideLengthM: Double? = null,
 )
 
 /** Lap info the writer needs from the workout engine. */

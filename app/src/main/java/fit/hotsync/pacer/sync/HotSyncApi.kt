@@ -46,6 +46,7 @@ class HotSyncApi(private val baseUrl: String = "https://hotsync.fit") {
         name: String?,
         eventId: String?,
         eventDate: String?,
+        data: ByteArray? = null,   // Full run data (gzipped JSON) kept by HotSync, not sent to Strava
     ): UploadResult = withContext(Dispatchers.IO) {
         val boundary = "----hotsync" + System.nanoTime()
         val crlf = "\r\n"
@@ -63,6 +64,13 @@ class HotSyncApi(private val baseUrl: String = "https://hotsync.fit") {
                 "Content-Type: application/octet-stream$crlf$crlf").toByteArray()
         )
         body.write(file)
+        if (data != null) {
+            body.write(
+                ("$crlf--$boundary${crlf}Content-Disposition: form-data; name=\"data\"; filename=\"$externalId.data.json.gz\"$crlf" +
+                    "Content-Type: application/gzip$crlf$crlf").toByteArray()
+            )
+            body.write(data)
+        }
         body.write("$crlf--$boundary--$crlf".toByteArray())
 
         parseUpload(raw("POST", "/watch/activities", body.toByteArray(), "multipart/form-data; boundary=$boundary", token))
