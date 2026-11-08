@@ -94,14 +94,15 @@ private fun PagerState.asIndicatorState() = object : PageIndicatorState {
 }
 
 // ----------------------------------------------------------------------------
-// Page 0: gauge + numbers + reserved alert bubble
+// Page 0: gauge + stacked big numbers + reserved alert bubble
 //
 //            ╭── gauge ──╮
-//              ♥ 132              <- primary: HR (HR workout) or pace (pace workout)
-//         5:48        4:12        <- other metric · time/distance left (large)
-//         PACE        LEFT
-//            Warm Up  1/3         <- segment + set
+//              ♥ 152              <- HR
+//             5:48 /km            <- pace      (pace workouts: pace first, HR last)
+//             4:12 left           <- time/distance left in the segment
+//            Warm-up  1/3         <- segment + set
 //          [ HR HIGH ↑ ]          <- reserved alert bubble
+// Each number gets its own full-width row so it can be large.
 // ----------------------------------------------------------------------------
 
 @Composable
@@ -109,63 +110,45 @@ private fun GaugePage(ui: WorkoutSession.Ui, ambient: Boolean) {
     val snap = ui.snapshot ?: return
     val workout = ui.workout ?: return
     val hrMode = workout.mode == TargetMode.HR
-    val textColor = Color.White
     val dim = if (ambient) Color.Gray else HsColors.Dim
-
-    val hrText = ui.heartRate?.toString() ?: "--"
-    val paceText = Format.pace(ui.paceSecPerKm)
+    val heart = if (ambient) dim else HsColors.Red
     val segment = snap.segment
 
     // Time/distance left in the segment, or elapsed for open segments
-    val rightText = when (segment?.duration) {
-        is Duration.Time -> Format.countdown(snap.remainingMs ?: 0)
-        is Duration.Distance -> Format.distance(snap.remainingM ?: 0.0)
-        Duration.Open -> Format.duration(snap.segmentElapsedMs)
-        null -> Format.duration(snap.totalActiveMs)
+    val (leftValue, leftUnit) = when (segment?.duration) {
+        is Duration.Time -> Format.countdown(snap.remainingMs ?: 0) to "left"
+        is Duration.Distance -> {
+            val m = (snap.remainingM ?: 0.0).coerceAtLeast(0.0)
+            if (m < 1000) "${m.toInt()}" to "m left" else "%.2f".format(m / 1000) to "km left"
+        }
+        Duration.Open -> Format.duration(snap.segmentElapsedMs) to "lap"
+        null -> Format.duration(snap.totalActiveMs) to "total"
     }
-    val rightCaption = when (segment?.duration) {
-        is Duration.Time, is Duration.Distance -> "LEFT"
-        Duration.Open -> "LAP TIME"
-        null -> "TOTAL"
-    }
+    val hr = ui.heartRate?.toString() ?: "--"
+    val pace = Format.pace(ui.paceSecPerKm)
 
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         WorkoutGauge(position = ui.gauge, ambient = ambient, hasTarget = segment?.target != null)
 
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.fillMaxSize().padding(top = 30.dp, bottom = 12.dp, start = 14.dp, end = 14.dp),
+            modifier = Modifier.fillMaxSize().padding(top = 26.dp, bottom = 10.dp, start = 12.dp, end = 12.dp),
         ) {
-            // Primary metric
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (hrMode) {
-                    Text("♥", color = if (ambient) dim else HsColors.Red, fontSize = 22.sp)
-                    Spacer(Modifier.width(4.dp))
-                }
-                Text(
-                    if (hrMode) hrText else paceText,
-                    color = textColor, fontSize = 52.sp, fontWeight = FontWeight.Black, lineHeight = 54.sp,
-                )
-                if (!hrMode) {
-                    Spacer(Modifier.width(3.dp))
-                    Text("/km", color = dim, fontSize = 13.sp)
-                }
-            }
-
-            // Secondary row: the other metric and time/distance left, both large
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-            ) {
-                BigValue(if (hrMode) paceText else hrText, if (hrMode) "PACE" else "♥ HR", textColor, dim)
-                BigValue(rightText, rightCaption, textColor, dim)
+            if (hrMode) {
+                MetricRow(hr, prefix = "♥", prefixColor = heart, unit = null, size = 40, dim = dim)
+                MetricRow(pace, prefix = null, prefixColor = dim, unit = "/km", size = 46, dim = dim)
+                MetricRow(leftValue, prefix = null, prefixColor = dim, unit = leftUnit, size = 46, dim = dim)
+            } else {
+                MetricRow(pace, prefix = null, prefixColor = dim, unit = "/km", size = 46, dim = dim)
+                MetricRow(leftValue, prefix = null, prefixColor = dim, unit = leftUnit, size = 46, dim = dim)
+                MetricRow(hr, prefix = "♥", prefixColor = heart, unit = null, size = 30, dim = dim)
             }
 
             // Segment name + set count (or zone)
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     segment?.label ?: "Complete",
-                    color = textColor, fontSize = 16.sp, fontWeight = FontWeight.Bold,
+                    color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold,
                     maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
                     modifier = Modifier.weight(1f, fill = false),
                 )
@@ -184,11 +167,22 @@ private fun GaugePage(ui: WorkoutSession.Ui, ambient: Boolean) {
     }
 }
 
+/** One big number with an optional small prefix (♥) and unit ("/km", "left"). */
 @Composable
-private fun BigValue(value: String, caption: String, color: Color, dim: Color) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(value, color = color, fontSize = 28.sp, fontWeight = FontWeight.Bold, maxLines = 1, lineHeight = 30.sp)
-        Text(caption, color = dim, fontSize = 11.sp)
+private fun MetricRow(value: String, prefix: String?, prefixColor: Color, unit: String?, size: Int, dim: Color) {
+    Row(verticalAlignment = Alignment.Bottom) {
+        if (prefix != null) {
+            Text(prefix, color = prefixColor, fontSize = (size * 0.5).sp, modifier = Modifier.padding(bottom = (size * 0.12).dp))
+            Spacer(Modifier.width(4.dp))
+        }
+        Text(
+            value, color = Color.White, fontSize = size.sp, fontWeight = FontWeight.Black,
+            lineHeight = (size + 2).sp, maxLines = 1,
+        )
+        if (unit != null) {
+            Spacer(Modifier.width(4.dp))
+            Text(unit, color = dim, fontSize = 13.sp, modifier = Modifier.padding(bottom = (size * 0.14).dp))
+        }
     }
 }
 
@@ -207,7 +201,7 @@ private fun AlertBubble(ui: WorkoutSession.Ui, ambient: Boolean) {
     }
     Box(
         modifier = Modifier
-            .height(26.dp)
+            .height(24.dp)
             .background(if (text == null || ambient) Color.Transparent else HsColors.Bubble, RoundedCornerShape(13.dp))
             .padding(horizontal = 14.dp),
         contentAlignment = Alignment.Center,
