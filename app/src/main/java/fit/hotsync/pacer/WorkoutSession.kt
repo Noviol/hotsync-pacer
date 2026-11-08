@@ -50,6 +50,7 @@ object WorkoutSession {
         val snapshot: WorkoutEngine.Snapshot? = null,
         val heartRate: Int? = null,
         val paceSecPerKm: Double? = null,
+        val cadenceSpm: Int? = null,         // steps per minute
         val status: TargetStatus = TargetStatus.UNKNOWN,
         val gauge: Double? = null,           // 0..1 pointer position, null = no reading
         val alert: TargetStatus? = null,     // BELOW/ABOVE while an alert is active
@@ -240,6 +241,7 @@ object WorkoutSession {
             snapshot = snap,
             heartRate = heartRate,
             paceSecPerKm = paceSecPerKm,
+            cadenceSpm = ExerciseSensors.cadenceSpm?.takeIf { it > 0 },
             status = status,
             gauge = TargetMath.gaugePosition(target, value),
             alert = alert.active,

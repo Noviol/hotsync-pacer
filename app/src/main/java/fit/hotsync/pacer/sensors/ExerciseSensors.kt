@@ -139,6 +139,8 @@ object ExerciseSensors {
         )
         if (gpsAllowed) wanted += DataType.LOCATION
         dataTypes = wanted.filter { it in supported }.toSet()
+        Log.i(TAG, "RUNNING supports: ${supported.joinToString { it.name }}")
+        Log.i(TAG, "Using: ${dataTypes.joinToString { it.name }}")
         gpsEnabled = DataType.LOCATION in dataTypes
     }
 

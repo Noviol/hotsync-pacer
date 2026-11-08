@@ -52,7 +52,7 @@ import kotlinx.coroutines.launch
 import kotlin.math.cos
 import kotlin.math.sin
 
-private const val PAGE_COUNT = 2  // 0 = workout gauge, 1 = controls (data pages come later)
+private const val PAGE_COUNT = 3  // 0 = workout gauge, 1 = run data, 2 = controls
 
 /**
  * The in-run screen. Swipe left/right between pages. In ambient mode only the
@@ -72,6 +72,7 @@ fun WorkoutRunScreen(ambient: Boolean, onEnded: () -> Unit, onDiscard: () -> Uni
             HorizontalPager(state = pager, modifier = Modifier.fillMaxSize()) { page ->
                 when (page) {
                     0 -> GaugePage(ui, ambient = false)
+                    1 -> DataPage(ui)
                     else -> ControlsPage(
                         ui,
                         onDiscard = onDiscard,
@@ -164,6 +165,27 @@ private fun GaugePage(ui: WorkoutSession.Ui, ambient: Boolean) {
             // Reserved alert bubble: the space is always kept so the layout never shifts
             AlertBubble(ui, ambient)
         }
+    }
+}
+
+/**
+ * Page 1: whole-run data. Cadence (steps per minute) on top, then distance,
+ * elapsed time and average pace for the whole run.
+ */
+@Composable
+private fun DataPage(ui: WorkoutSession.Ui) {
+    val snap = ui.snapshot ?: return
+    val avgPace = if (snap.totalDistanceM > 50) snap.totalActiveMs / 1000.0 / (snap.totalDistanceM / 1000) else null
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+        modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 18.dp),
+    ) {
+        MetricRow(ui.cadenceSpm?.toString() ?: "--", prefix = null, prefixColor = HsColors.Dim, unit = "spm", size = 46, dim = HsColors.Dim)
+        MetricRow(Format.distance(snap.totalDistanceM).substringBefore(" "), prefix = null, prefixColor = HsColors.Dim,
+            unit = Format.distance(snap.totalDistanceM).substringAfter(" "), size = 34, dim = HsColors.Dim)
+        MetricRow(Format.duration(snap.totalActiveMs), prefix = null, prefixColor = HsColors.Dim, unit = "time", size = 34, dim = HsColors.Dim)
+        MetricRow(Format.pace(avgPace), prefix = null, prefixColor = HsColors.Dim, unit = "avg /km", size = 34, dim = HsColors.Dim)
     }
 }
 
