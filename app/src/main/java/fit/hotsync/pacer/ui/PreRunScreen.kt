@@ -33,10 +33,10 @@ fun PreRunScreen(onStart: () -> Unit) {
         timeText = { TimeText() },
         positionIndicator = { PositionIndicator(scalingLazyListState = listState) },
     ) {
-        ScalingLazyColumn(state = listState) {
+        ScalingLazyColumn(state = listState, modifier = Modifier.crownScroll(listState)) {
             item {
                 Text(
-                    "TODAY'S WORKOUT  ·  ${if (workout.mode == TargetMode.HR) "HR" else "PACE"}",
+                    "${ui.header}  ·  ${if (workout.mode == TargetMode.HR) "HR" else "PACE"}",
                     color = HsColors.Orange, fontSize = 11.sp, fontWeight = FontWeight.Bold,
                 )
             }

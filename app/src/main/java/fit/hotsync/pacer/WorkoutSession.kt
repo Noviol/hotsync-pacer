@@ -32,6 +32,9 @@ object WorkoutSession {
 
     data class Ui(
         val workout: Workout? = null,
+        val header: String = "WORKOUT",     // e.g. "TODAY'S WORKOUT" or "LIBRARY"
+        val eventId: String? = null,         // Calendar event this run is for (used when uploading)
+        val eventDate: java.time.LocalDate? = null,
         val snapshot: WorkoutEngine.Snapshot? = null,
         val heartRate: Int? = null,
         val paceSecPerKm: Double? = null,
@@ -71,14 +74,23 @@ object WorkoutSession {
 
     /** Load a workout for the pre-run screen. */
     @Synchronized
-    fun prepare(workout: Workout, alerts: AlertSettings) {
+    fun prepare(
+        workout: Workout,
+        alerts: AlertSettings,
+        header: String = "WORKOUT",
+        eventId: String? = null,
+        eventDate: java.time.LocalDate? = null,
+    ) {
         engine = WorkoutEngine(workout)
         alertTracker = AlertTracker(alerts.delaySeconds * 1000L)
         lastCompletedCount = 0
         heartRate = null
         paceSecPerKm = null
         distanceM = 0.0
-        _ui.value = Ui(workout = workout, alerts = alerts, snapshot = engine!!.snapshot(now()))
+        _ui.value = Ui(
+            workout = workout, header = header, eventId = eventId, eventDate = eventDate,
+            alerts = alerts, snapshot = engine!!.snapshot(now()),
+        )
     }
 
     @Synchronized

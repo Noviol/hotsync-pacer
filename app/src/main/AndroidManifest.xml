@@ -12,6 +12,9 @@
     <!-- "specialUse" foreground-service type for a long-running precision clock (API 34+). -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
+    <!-- Pairing and syncing workouts with hotsync.fit. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <!-- Haptic alerts during structured workouts. -->
     <uses-permission android:name="android.permission.VIBRATE" />
 

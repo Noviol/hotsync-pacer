@@ -66,6 +66,8 @@ dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
 
     testImplementation("junit:junit:4.13.2")
+    // Real org.json for JVM tests (android.jar only has stubs)
+    testImplementation("org.json:json:20240303")
 
     androidTestImplementation(platform(libs.compose.bom))
     androidTestImplementation(libs.ui.test.junit4)

@@ -35,7 +35,7 @@ fun SummaryScreen(onDone: () -> Unit) {
         timeText = { TimeText() },
         positionIndicator = { PositionIndicator(scalingLazyListState = listState) },
     ) {
-        ScalingLazyColumn(state = listState) {
+        ScalingLazyColumn(state = listState, modifier = Modifier.crownScroll(listState)) {
             item {
                 Text(
                     if (snap?.isComplete == true) "Workout complete" else "Workout ended",

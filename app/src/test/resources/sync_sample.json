@@ -1,0 +1,161 @@
+{
+ "server_time": "2026-11-08T01:11:42.753467",
+ "timezone": "America/Los_Angeles",
+ "today": "2026-11-07",
+ "profile": {
+  "hr_zones": [
+   {
+    "id": "z1",
+    "name": "Zone 1",
+    "low": 126,
+    "high": 139
+   },
+   {
+    "id": "z3",
+    "name": "Zone 3",
+    "low": 150,
+    "high": 160
+   }
+  ],
+  "pace_zones": [
+   {
+    "id": "p1",
+    "name": "Easy",
+    "slow_sec_per_km": 420,
+    "fast_sec_per_km": 390
+   }
+  ],
+  "alert_haptic": true,
+  "alert_sound": true,
+  "alert_visual": true,
+  "alert_delay_seconds": 15
+ },
+ "workouts": [
+  {
+   "id": "85579769-89bf-4cc1-8b70-7fb7e4542961",
+   "name": "Easy 45",
+   "description": null,
+   "target_mode": "pace",
+   "steps": [
+    {
+     "kind": "time",
+     "label": "Easy",
+     "seconds": 2700,
+     "zone_id": "p1",
+     "target": {
+      "zone_name": "Easy",
+      "slow_sec_per_km": 420,
+      "fast_sec_per_km": 390
+     }
+    }
+   ],
+   "total_seconds": 2700,
+   "total_meters": null,
+   "updated_at": "2026-11-08T01:11:42.597882"
+  },
+  {
+   "id": "630c4d54-0152-4784-be23-1467d249541b",
+   "name": "Free strides",
+   "description": null,
+   "target_mode": "hr",
+   "steps": [
+    {
+     "kind": "distance",
+     "label": "Stride",
+     "meters": 100.5,
+     "zone_id": null,
+     "target": null
+    }
+   ],
+   "total_seconds": null,
+   "total_meters": 100.5,
+   "updated_at": "2026-11-08T01:11:42.623001"
+  },
+  {
+   "id": "fb4cabcd-81c6-4f26-85ed-f670e160d5c3",
+   "name": "RP12 (Progression Run)",
+   "description": null,
+   "target_mode": "hr",
+   "steps": [
+    {
+     "kind": "time",
+     "label": "Warm-up",
+     "seconds": 600,
+     "zone_id": "z1",
+     "target": {
+      "zone_name": "Zone 1",
+      "low_bpm": 126,
+      "high_bpm": 139
+     }
+    },
+    {
+     "kind": "repeat",
+     "count": 4,
+     "steps": [
+      {
+       "kind": "distance",
+       "label": "Fast",
+       "meters": 1000.0,
+       "zone_id": "z3",
+       "target": {
+        "zone_name": "Zone 3",
+        "low_bpm": 150,
+        "high_bpm": 160
+       }
+      },
+      {
+       "kind": "time",
+       "label": "Recover",
+       "seconds": 120,
+       "zone_id": "z1",
+       "target": {
+        "zone_name": "Zone 1",
+        "low_bpm": 126,
+        "high_bpm": 139
+       }
+      }
+     ]
+    },
+    {
+     "kind": "open",
+     "label": "Cool-down",
+     "zone_id": "z1",
+     "target": {
+      "zone_name": "Zone 1",
+      "low_bpm": 126,
+      "high_bpm": 139
+     }
+    }
+   ],
+   "total_seconds": null,
+   "total_meters": null,
+   "updated_at": "2026-11-08T01:11:42.573579"
+  }
+ ],
+ "schedule": [
+  {
+   "date": "2026-11-08",
+   "event_id": "e1",
+   "title": "RP12 Progression Run",
+   "block": "AM",
+   "seq": 1,
+   "workout_id": "fb4cabcd-81c6-4f26-85ed-f670e160d5c3"
+  },
+  {
+   "date": "2026-11-08",
+   "event_id": "e2",
+   "title": "Strength",
+   "block": "PM",
+   "seq": 1,
+   "workout_id": null
+  },
+  {
+   "date": "2026-11-09",
+   "event_id": "e3",
+   "title": "Easy Run",
+   "block": "AM",
+   "seq": 1,
+   "workout_id": "85579769-89bf-4cc1-8b70-7fb7e4542961"
+  }
+ ]
+}

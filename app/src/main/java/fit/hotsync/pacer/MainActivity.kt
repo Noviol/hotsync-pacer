@@ -4,6 +4,9 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -15,12 +18,15 @@ import androidx.wear.compose.navigation.SwipeDismissableNavHost
 import androidx.wear.compose.navigation.composable
 import androidx.wear.compose.navigation.currentBackStackEntryAsState
 import androidx.wear.compose.navigation.rememberSwipeDismissableNavController
+import fit.hotsync.pacer.sync.SyncRepository
 import fit.hotsync.pacer.ui.HomeScreen
+import fit.hotsync.pacer.ui.LibraryScreen
+import fit.hotsync.pacer.ui.PairScreen
 import fit.hotsync.pacer.ui.PreRunScreen
 import fit.hotsync.pacer.ui.RaceScreen
 import fit.hotsync.pacer.ui.SummaryScreen
 import fit.hotsync.pacer.ui.WorkoutRunScreen
-import fit.hotsync.pacer.workout.SampleWorkouts
+import kotlinx.coroutines.launch
 
 /**
  * MainActivity
@@ -28,7 +34,8 @@ import fit.hotsync.pacer.workout.SampleWorkouts
  * Hosts the Compose-for-Wear UI and wires up Always-On (ambient) mode.
  *
  * Modes:
- *   - Today's Workout: pre-run -> structured workout -> summary
+ *   - Workouts synced from hotsync.fit (today's, coming up, library):
+ *     pre-run -> structured workout -> summary
  *   - Race Pacer: the original marker-based race clock
  *
  * The Activity holds NO run state: [PacerEngine] and [WorkoutSession] do, and
@@ -63,6 +70,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         lifecycle.addObserver(ambientObserver)
+        SyncRepository.init(this)
 
         setContent {
             MaterialTheme {
@@ -78,12 +86,20 @@ private object Routes {
     const val WORKOUT = "workout"
     const val SUMMARY = "summary"
     const val RACE = "race"
+    const val PAIR = "pair"
+    const val LIBRARY = "library"
 }
+
+private fun alertsFrom(defaults: fit.hotsync.pacer.sync.AlertDefaults?) = defaults?.let {
+    WorkoutSession.AlertSettings(it.haptic, it.sound, it.visual, it.delaySeconds)
+} ?: WorkoutSession.AlertSettings()
 
 @Composable
 fun HotSyncApp(ambient: Boolean) {
     val context = LocalContext.current
     val nav = rememberSwipeDismissableNavController()
+    val scope = rememberCoroutineScope()
+    val syncState by SyncRepository.state.collectAsState()
 
     // Reopening the app mid-run goes straight back to the run
     val startRoute = remember {
@@ -107,19 +123,32 @@ fun HotSyncApp(ambient: Boolean) {
 
     SwipeDismissableNavHost(navController = nav, startDestination = startRoute, userSwipeEnabled = swipeEnabled) {
         composable(Routes.HOME) {
-            // Hardcoded until sync exists; replaced by today's linked workout
-            val workout = SampleWorkouts.rp12
+            LaunchedEffect(Unit) { SyncRepository.sync() }  // Refresh whenever home is shown (at most once a minute)
             HomeScreen(
-                todaysWorkout = workout,
-                onWorkout = {
-                    WorkoutSession.prepare(workout, WorkoutSession.AlertSettings())
+                state = syncState,
+                onPair = { nav.navigate(Routes.PAIR) },
+                onScheduled = { entry, workout ->
+                    val header = if (entry.date == java.time.LocalDate.now()) "TODAY'S WORKOUT" else "SCHEDULED"
+                    WorkoutSession.prepare(workout, alertsFrom(syncState.data?.alerts), header, entry.eventId, entry.date)
                     nav.navigate(Routes.PRE_RUN)
                 },
+                onLibrary = { nav.navigate(Routes.LIBRARY) },
                 onRace = {
                     PacerService.startRace(context)
                     nav.navigate(Routes.RACE)
                 },
+                onSync = { scope.launch { SyncRepository.sync(force = true) } },
+                onUnpair = { SyncRepository.unpair() },
             )
+        }
+        composable(Routes.PAIR) {
+            PairScreen(onPaired = { goHome() })
+        }
+        composable(Routes.LIBRARY) {
+            LibraryScreen(syncState.data?.workouts.orEmpty()) { workout ->
+                WorkoutSession.prepare(workout, alertsFrom(syncState.data?.alerts), "LIBRARY")
+                nav.navigate(Routes.PRE_RUN)
+            }
         }
         composable(Routes.PRE_RUN) {
             PreRunScreen(onStart = {
