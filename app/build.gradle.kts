@@ -21,7 +21,11 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // Sideloaded personal app: sign with the debug key so it installs over debug builds.
+            // Optimized (R8) builds make Compose noticeably smoother than debug builds.
+            signingConfig = signingConfigs.getByName("debug")
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -54,6 +58,13 @@ dependencies {
     implementation(libs.core.splashscreen)
 
     // ---- Added for HotSync Pacer ------------------------------------------
+    // Health Services: HR, GPS, distance, elevation, cadence during a run.
+    implementation("androidx.health:health-services-client:1.0.0")
+    // ListenableFuture.await() for Health Services calls.
+    implementation("androidx.concurrent:concurrent-futures-ktx:1.2.0")
+    implementation("com.google.guava:guava:33.3.1-android") // ListenableFuture type used by Health Services APIs
+    // Queued, retrying uploads of finished runs (works after reconnecting).
+    implementation("androidx.work:work-runtime-ktx:2.10.0")
     // Swipe-to-dismiss navigation between screens.
     implementation("androidx.wear.compose:compose-navigation:1.3.1")
     // Ambient / Always-On Display support (AmbientLifecycleObserver).

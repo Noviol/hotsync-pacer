@@ -21,6 +21,7 @@ import androidx.wear.compose.material.Scaffold
 import androidx.wear.compose.material.Text
 import androidx.wear.compose.material.TimeText
 import fit.hotsync.pacer.WorkoutSession
+import fit.hotsync.pacer.upload.UploadQueue
 import fit.hotsync.pacer.workout.Format
 
 /** Summary: totals + per-segment breakdown. Upload to HotSync arrives with sync. */
@@ -29,6 +30,8 @@ fun SummaryScreen(onDone: () -> Unit) {
     val ui by WorkoutSession.ui.collectAsStateWithLifecycle()
     val snap = ui.snapshot
     val completed = WorkoutSession.completed
+    val uploads by UploadQueue.items.collectAsStateWithLifecycle()
+    val upload = ui.uploadId?.let { uploads[it] }
     val listState = rememberScalingLazyListState()
 
     Scaffold(
@@ -48,6 +51,16 @@ fun SummaryScreen(onDone: () -> Unit) {
                     "${Format.duration(snap?.totalActiveMs ?: 0)}  ·  ${Format.distance(snap?.totalDistanceM ?: 0.0)}",
                     fontSize = 20.sp, fontWeight = FontWeight.Bold,
                 )
+            }
+            item {
+                val (text, color) = when (upload?.state) {
+                    null -> (if (ui.uploadId == null) "Nothing recorded to upload" else "Saving…") to HsColors.Dim
+                    UploadQueue.State.WAITING -> "Strava: ${upload.message ?: "waiting"}" to HsColors.Orange
+                    UploadQueue.State.UPLOADING -> "Strava: uploading…" to HsColors.Orange
+                    UploadQueue.State.DONE -> "✓ ${upload.message ?: "On Strava"}" to HsColors.Green
+                    UploadQueue.State.FAILED -> "Upload failed: ${upload.message}" to HsColors.Red
+                }
+                Text(text, color = color, fontSize = 13.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
             }
             items(completed) { c ->
                 Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {

@@ -1,6 +1,18 @@
 package fit.hotsync.pacer
 
+import android.content.Context
+import android.os.Build
 import android.os.SystemClock
+import fit.hotsync.pacer.recording.LapInfo
+import fit.hotsync.pacer.recording.RunRecording
+import fit.hotsync.pacer.recording.TcxWriter
+import fit.hotsync.pacer.recording.TrackPoint
+import fit.hotsync.pacer.sensors.ExerciseSensors
+import fit.hotsync.pacer.upload.UploadQueue
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import fit.hotsync.pacer.workout.AlertTracker
 import fit.hotsync.pacer.workout.TargetMath
 import fit.hotsync.pacer.workout.TargetMode
@@ -43,6 +55,7 @@ object WorkoutSession {
         val alert: TargetStatus? = null,     // BELOW/ABOVE while an alert is active
         val alerts: AlertSettings = AlertSettings(),
         val ended: Boolean = false,
+        val uploadId: String? = null,        // Set once the run is saved and queued for Strava
     )
 
     /** Haptics/sound live in the service (it has a Context); the session only decides when. */
@@ -61,6 +74,9 @@ object WorkoutSession {
     private var engine: WorkoutEngine? = null
     private var alertTracker = AlertTracker(10_000)
     private var lastCompletedCount = 0
+    private var recording: RunRecording? = null
+    private var lastPointAtMs = 0L
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     private val _ui = MutableStateFlow(Ui())
     val ui: StateFlow<Ui> = _ui.asStateFlow()
@@ -87,6 +103,7 @@ object WorkoutSession {
         heartRate = null
         paceSecPerKm = null
         distanceM = 0.0
+        recording = null
         _ui.value = Ui(
             workout = workout, header = header, eventId = eventId, eventDate = eventDate,
             alerts = alerts, snapshot = engine!!.snapshot(now()),
@@ -103,6 +120,8 @@ object WorkoutSession {
         val e = engine ?: return
         if (e.isStarted) return
         e.start(now(), distanceM)
+        recording = RunRecording(System.currentTimeMillis())
+        lastPointAtMs = 0L
         publish(e.snapshot(now()))
     }
 
@@ -112,6 +131,28 @@ object WorkoutSession {
         val e = engine ?: return
         if (!e.isStarted || _ui.value.ended) return
         publish(e.update(now(), distanceM))
+        recordPoint(e)
+    }
+
+    /** One track point per second while running (not while paused). */
+    private fun recordPoint(e: WorkoutEngine) {
+        val rec = recording ?: return
+        val t = now()
+        if (e.isPaused || t - lastPointAtMs < 1_000) return
+        lastPointAtMs = t
+        val loc = ExerciseSensors.location?.takeIf { t - it.atElapsedMs < 5_000 }
+        rec.add(
+            TrackPoint(
+                epochMs = System.currentTimeMillis(),
+                lat = loc?.lat,
+                lon = loc?.lon,
+                altitudeM = ExerciseSensors.elevationM ?: loc?.altitudeM,
+                distanceM = distanceM,
+                heartRate = heartRate,
+                cadenceSpm = ExerciseSensors.cadenceSpm,
+                segment = e.index,
+            )
+        )
     }
 
     @Synchronized
@@ -125,7 +166,13 @@ object WorkoutSession {
     fun togglePause() {
         val e = engine ?: return
         if (_ui.value.ended) return
-        if (e.isPaused) e.resume(now()) else e.pause(now())
+        if (e.isPaused) {
+            e.resume(now())
+            scope.launch { ExerciseSensors.resume() }
+        } else {
+            e.pause(now())
+            scope.launch { ExerciseSensors.pause() }
+        }
         publish(e.snapshot(now()))
     }
 
@@ -136,9 +183,38 @@ object WorkoutSession {
         _ui.value = _ui.value.copy(snapshot = e.snapshot(now()), alert = null, ended = true)
     }
 
+    /**
+     * After [end]: write the run as TCX and queue it for Strava.
+     * Returns the upload id, or null if nothing was recorded.
+     */
+    @Synchronized
+    fun save(context: Context): String? {
+        val e = engine ?: return null
+        val rec = recording ?: return null
+        val ui = _ui.value
+        if (ui.uploadId != null) return ui.uploadId
+        if (rec.points.isEmpty()) return null
+        val laps = e.segments.map { seg ->
+            LapInfo(seg.index, seg.label + (seg.setText?.let { " $it" } ?: ""), e.completed.getOrNull(seg.index)?.durationMs)
+        }
+        val tcx = TcxWriter.write(rec, laps, Build.MODEL ?: "Wear OS watch")
+        val id = "hotsync-${rec.startEpochMs}"
+        UploadQueue.enqueue(
+            context, id, tcx,
+            UploadQueue.Meta(
+                name = ui.workout?.name ?: "Run",
+                eventId = ui.eventId,
+                eventDate = ui.eventDate?.toString(),
+            ),
+        )
+        _ui.value = ui.copy(uploadId = id)
+        return id
+    }
+
     @Synchronized
     fun clear() {
         engine = null
+        recording = null
         _ui.value = Ui()
     }
 

@@ -35,19 +35,69 @@ class HotSyncApi(private val baseUrl: String = "https://hotsync.fit") {
     /** Raw JSON, so it can be cached as-is and parsed with [SyncParser]. */
     suspend fun sync(token: String): String = request("GET", "/watch/sync", token = token)
 
+    data class UploadResult(val uploadId: Long?, val status: String, val activityId: Long?, val error: String?)
+
+    /** POST /watch/activities (multipart). The server uploads the file to Strava. */
+    suspend fun uploadActivity(
+        token: String,
+        file: ByteArray,
+        filename: String,
+        externalId: String,
+        name: String?,
+        eventId: String?,
+        eventDate: String?,
+    ): UploadResult = withContext(Dispatchers.IO) {
+        val boundary = "----hotsync" + System.nanoTime()
+        val crlf = "\r\n"
+        val body = java.io.ByteArrayOutputStream()
+        fun field(key: String, value: String?) {
+            if (value == null) return
+            body.write("--$boundary${crlf}Content-Disposition: form-data; name=\"$key\"$crlf$crlf$value$crlf".toByteArray())
+        }
+        field("external_id", externalId)
+        field("name", name)
+        field("event_id", eventId)
+        field("event_date", eventDate)
+        body.write(
+            ("--$boundary${crlf}Content-Disposition: form-data; name=\"file\"; filename=\"$filename\"$crlf" +
+                "Content-Type: application/octet-stream$crlf$crlf").toByteArray()
+        )
+        body.write(file)
+        body.write("$crlf--$boundary--$crlf".toByteArray())
+
+        parseUpload(raw("POST", "/watch/activities", body.toByteArray(), "multipart/form-data; boundary=$boundary", token))
+    }
+
+    suspend fun uploadStatus(token: String, uploadId: Long): UploadResult =
+        parseUpload(request("GET", "/watch/activities/$uploadId", token = token))
+
+    private fun parseUpload(text: String): UploadResult {
+        val o = JSONObject(text)
+        return UploadResult(
+            uploadId = if (o.isNull("upload_id")) null else o.getLong("upload_id"),
+            status = o.optString("status"),
+            activityId = if (o.isNull("activity_id")) null else o.getLong("activity_id"),
+            error = if (o.isNull("error")) null else o.optString("error"),
+        )
+    }
+
     private suspend fun request(method: String, path: String, body: JSONObject? = null, token: String? = null): String =
+        raw(method, path, body?.toString()?.toByteArray(), if (body != null) "application/json" else null, token)
+
+    private suspend fun raw(method: String, path: String, body: ByteArray?, contentType: String?, token: String?): String =
         withContext(Dispatchers.IO) {
             val conn = URL(baseUrl + path).openConnection() as HttpURLConnection
             try {
                 conn.requestMethod = method
                 conn.connectTimeout = 15_000
-                conn.readTimeout = 20_000
+                conn.readTimeout = 60_000
                 conn.setRequestProperty("Accept", "application/json")
                 token?.let { conn.setRequestProperty("Authorization", "Bearer $it") }
                 if (body != null) {
                     conn.doOutput = true
-                    conn.setRequestProperty("Content-Type", "application/json")
-                    conn.outputStream.use { it.write(body.toString().toByteArray()) }
+                    contentType?.let { conn.setRequestProperty("Content-Type", it) }
+                    conn.setFixedLengthStreamingMode(body.size)
+                    conn.outputStream.use { it.write(body) }
                 }
                 val code = conn.responseCode
                 val text = (if (code in 200..299) conn.inputStream else conn.errorStream)

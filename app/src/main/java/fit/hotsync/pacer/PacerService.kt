@@ -7,6 +7,8 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.content.pm.ServiceInfo
 import android.media.AudioManager
 import android.media.ToneGenerator
 import android.os.IBinder
@@ -15,6 +17,7 @@ import android.os.VibrationEffect
 import android.os.VibratorManager
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
+import fit.hotsync.pacer.sensors.ExerciseSensors
 import fit.hotsync.pacer.workout.TargetStatus
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -97,23 +100,45 @@ class PacerService : Service(), WorkoutSession.Feedback {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_START_RACE -> {
-                startForeground(NOTIFICATION_ID, buildNotification("Race Pacer Active", "Race clock running"))
+                startForeground(
+                    NOTIFICATION_ID, buildNotification("Race Pacer Active", "Race clock running"),
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE,
+                )
                 if (!PacerEngine.isRunning) PacerEngine.start()
             }
             ACTION_START_WORKOUT -> {
                 val name = WorkoutSession.ui.value.workout?.name ?: "Workout"
-                startForeground(NOTIFICATION_ID, buildNotification("Workout Active", name))
+                startForeground(NOTIFICATION_ID, buildNotification("Workout Active", name), workoutServiceType())
                 WorkoutSession.start()
+                val gps = granted(android.Manifest.permission.ACCESS_FINE_LOCATION)
+                scope.launch { ExerciseSensors.start(gpsAllowed = gps) }
             }
             else -> {
                 // Restarted by the system after the process died: the in-memory run is gone.
-                startForeground(NOTIFICATION_ID, buildNotification("HotSync", "Stopping"))
+                startForeground(
+                    NOTIFICATION_ID, buildNotification("HotSync", "Stopping"),
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE,
+                )
                 stopSelf()
                 return START_NOT_STICKY
             }
         }
         startClockLoop()
         return START_STICKY
+    }
+
+    private fun granted(permission: String) =
+        checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
+
+    /** Health + location types keep sensors flowing with the screen off; each needs its permission. */
+    private fun workoutServiceType(): Int {
+        var type = 0
+        val health = granted(android.Manifest.permission.ACTIVITY_RECOGNITION) ||
+            granted(android.Manifest.permission.BODY_SENSORS) ||
+            granted("android.permission.health.READ_HEART_RATE")
+        if (health) type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_HEALTH
+        if (granted(android.Manifest.permission.ACCESS_FINE_LOCATION)) type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+        return if (type == 0) ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else type
     }
 
     /** The MASTER CLOCK LOOP: ticks whichever mode is running. */

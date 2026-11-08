@@ -18,7 +18,10 @@ import androidx.wear.compose.navigation.SwipeDismissableNavHost
 import androidx.wear.compose.navigation.composable
 import androidx.wear.compose.navigation.currentBackStackEntryAsState
 import androidx.wear.compose.navigation.rememberSwipeDismissableNavController
+import androidx.compose.runtime.DisposableEffect
+import fit.hotsync.pacer.sensors.ExerciseSensors
 import fit.hotsync.pacer.sync.SyncRepository
+import fit.hotsync.pacer.upload.UploadQueue
 import fit.hotsync.pacer.ui.HomeScreen
 import fit.hotsync.pacer.ui.LibraryScreen
 import fit.hotsync.pacer.ui.PairScreen
@@ -71,6 +74,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         lifecycle.addObserver(ambientObserver)
         SyncRepository.init(this)
+        ExerciseSensors.init(this)
+        UploadQueue.resumePending(this)  // Send any run saved while offline
 
         setContent {
             MaterialTheme {
@@ -151,16 +156,33 @@ fun HotSyncApp(ambient: Boolean) {
             }
         }
         composable(Routes.PRE_RUN) {
+            val started = remember { booleanArrayOf(false) }
+            // Leaving pre-run without starting: stop the GPS/HR warm-up
+            DisposableEffect(Unit) {
+                onDispose { if (!started[0]) scope.launch { ExerciseSensors.end() } }
+            }
             PreRunScreen(onStart = {
+                started[0] = true
                 PacerService.startWorkout(context)
                 nav.navigate(Routes.WORKOUT) { popUpTo(Routes.HOME) }
             })
         }
         composable(Routes.WORKOUT) {
-            WorkoutRunScreen(ambient = ambient, onEnded = {
-                PacerService.stop(context)
-                nav.navigate(Routes.SUMMARY) { popUpTo(Routes.HOME) }
-            })
+            WorkoutRunScreen(
+                ambient = ambient,
+                onEnded = {
+                    WorkoutSession.save(context)  // TCX -> upload queue -> Strava
+                    scope.launch { ExerciseSensors.end() }
+                    PacerService.stop(context)
+                    nav.navigate(Routes.SUMMARY) { popUpTo(Routes.HOME) }
+                },
+                onDiscard = {
+                    scope.launch { ExerciseSensors.end() }
+                    PacerService.stop(context)
+                    WorkoutSession.clear()
+                    goHome()
+                },
+            )
         }
         composable(Routes.SUMMARY) {
             SummaryScreen(onDone = {

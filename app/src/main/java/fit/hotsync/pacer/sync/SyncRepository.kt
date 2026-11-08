@@ -46,6 +46,8 @@ object SyncRepository {
         )
     }
 
+    fun token(): String? = prefs.getString(KEY_TOKEN, null)
+
     /** Called when pairing completes. */
     suspend fun savePairing(token: String) {
         prefs.edit().putString(KEY_TOKEN, token).apply()

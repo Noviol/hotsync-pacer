@@ -12,6 +12,15 @@
     <!-- "specialUse" foreground-service type for a long-running precision clock (API 34+). -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
+    <!-- Run sensors: heart rate, GPS, cadence (Health Services). -->
+    <uses-permission android:name="android.permission.BODY_SENSORS" android:maxSdkVersion="35" />
+    <uses-permission android:name="android.permission.health.READ_HEART_RATE" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_HEALTH" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+
     <!-- Pairing and syncing workouts with hotsync.fit. -->
     <uses-permission android:name="android.permission.INTERNET" />
 
@@ -48,7 +57,7 @@
         <service
             android:name=".PacerService"
             android:exported="false"
-            android:foregroundServiceType="specialUse">
+            android:foregroundServiceType="specialUse|health|location">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="High-precision run clock (race pacer and structured workouts) that must keep running for the whole run with the screen off." />

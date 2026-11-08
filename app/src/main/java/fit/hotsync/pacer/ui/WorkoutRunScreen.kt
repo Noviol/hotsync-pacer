@@ -57,7 +57,7 @@ private const val PAGE_COUNT = 2  // 0 = workout gauge, 1 = controls (data pages
  * gauge page is drawn, without colour.
  */
 @Composable
-fun WorkoutRunScreen(ambient: Boolean, onEnded: () -> Unit) {
+fun WorkoutRunScreen(ambient: Boolean, onEnded: () -> Unit, onDiscard: () -> Unit) {
     val ui by WorkoutSession.ui.collectAsStateWithLifecycle()
     LaunchedEffect(ui.ended) { if (ui.ended) onEnded() }
 
@@ -69,7 +69,7 @@ fun WorkoutRunScreen(ambient: Boolean, onEnded: () -> Unit) {
             HorizontalPager(state = pager, modifier = Modifier.fillMaxSize()) { page ->
                 when (page) {
                     0 -> GaugePage(ui, ambient = false)
-                    else -> ControlsPage(ui)
+                    else -> ControlsPage(ui, onDiscard)
                 }
             }
             HorizontalPageIndicator(
@@ -177,7 +177,7 @@ private fun AlertBubble(ui: WorkoutSession.Ui, ambient: Boolean) {
     val hrMode = ui.workout?.mode == TargetMode.HR
     val (text, color) = when {
         snap?.isPaused == true -> "PAUSED" to HsColors.Orange
-        snap?.isComplete == true -> "DONE · SWIPE TO END" to HsColors.Green
+        snap?.isComplete == true -> "DONE · SWIPE TO SAVE" to HsColors.Green
         ui.alerts.visual && ui.alert == TargetStatus.ABOVE ->
             (if (hrMode) "HR HIGH ↑" else "PACE FAST ↑") to HsColors.Red
         ui.alerts.visual && ui.alert == TargetStatus.BELOW ->
@@ -240,42 +240,73 @@ private fun WorkoutGauge(position: Double?, ambient: Boolean, hasTarget: Boolean
 // Page 1: controls
 // ----------------------------------------------------------------------------
 
+/**
+ * Running: Pause and Lap. Paused: Resume, Save (ends -> summary) and Discard.
+ * Saving only from pause means a stray tap can never end a run.
+ */
 @Composable
-private fun ControlsPage(ui: WorkoutSession.Ui) {
+private fun ControlsPage(ui: WorkoutSession.Ui, onDiscard: () -> Unit) {
     val snap = ui.snapshot
+    val paused = snap?.isPaused == true
+    val complete = snap?.isComplete == true
     val listState = rememberScalingLazyListState()
-    var confirmEnd by remember { mutableStateOf(false) }
+    var confirmDiscard by remember { mutableStateOf(false) }
+    LaunchedEffect(paused) { confirmDiscard = false }
 
     ScalingLazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
-        item {
-            Chip(
-                modifier = Modifier.fillMaxWidth(),
-                onClick = { WorkoutSession.lap() },
-                enabled = snap?.isPaused == false && snap.isComplete == false,
-                label = { Text("Lap", fontWeight = FontWeight.Bold) },
-                secondaryLabel = { Text(snap?.next?.let { "Next: ${it.label}" } ?: "End segment") },
-                colors = ChipDefaults.primaryChipColors(backgroundColor = HsColors.Orange),
-            )
-        }
-        item {
-            Chip(
-                modifier = Modifier.fillMaxWidth(),
-                onClick = { WorkoutSession.togglePause() },
-                label = { Text(if (snap?.isPaused == true) "Resume" else "Pause") },
-                colors = ChipDefaults.secondaryChipColors(),
-            )
+        if (!paused) {
+            item {
+                Chip(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = { WorkoutSession.togglePause() },
+                    label = { Text("Pause", fontWeight = FontWeight.Bold) },
+                    secondaryLabel = { Text(if (complete) "Then save your workout" else "Resume or save next") },
+                    colors = ChipDefaults.primaryChipColors(
+                        backgroundColor = if (complete) HsColors.Green else HsColors.Orange,
+                    ),
+                )
+            }
+            if (!complete) {
+                item {
+                    Chip(
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = { WorkoutSession.lap() },
+                        label = { Text("Lap") },
+                        secondaryLabel = { Text(snap?.next?.let { "Next: ${it.label}" } ?: "End segment") },
+                        colors = ChipDefaults.secondaryChipColors(),
+                    )
+                }
+            }
+        } else {
+            item {
+                Chip(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = { WorkoutSession.togglePause() },
+                    label = { Text("Resume", fontWeight = FontWeight.Bold) },
+                    colors = ChipDefaults.primaryChipColors(backgroundColor = HsColors.Green),
+                )
+            }
+            item {
+                Chip(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = { WorkoutSession.end() },
+                    label = { Text("Save", fontWeight = FontWeight.Bold) },
+                    secondaryLabel = { Text("End workout") },
+                    colors = ChipDefaults.primaryChipColors(backgroundColor = HsColors.Orange),
+                )
+            }
+            item {
+                // Two taps, so a stray touch can't throw a run away
+                Chip(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = { if (confirmDiscard) onDiscard() else confirmDiscard = true },
+                    label = { Text(if (confirmDiscard) "Tap again to discard" else "Discard") },
+                    colors = ChipDefaults.primaryChipColors(backgroundColor = HsColors.Red),
+                )
+            }
         }
         item { AlertToggle("Haptic", ui.alerts.haptic) { WorkoutSession.setAlerts(ui.alerts.copy(haptic = it)) } }
         item { AlertToggle("Sound", ui.alerts.sound) { WorkoutSession.setAlerts(ui.alerts.copy(sound = it)) } }
         item { AlertToggle("Visual", ui.alerts.visual) { WorkoutSession.setAlerts(ui.alerts.copy(visual = it)) } }
-        item {
-            // Two taps to end, so a stray touch can't stop the workout
-            Chip(
-                modifier = Modifier.fillMaxWidth(),
-                onClick = { if (confirmEnd) WorkoutSession.end() else confirmEnd = true },
-                label = { Text(if (confirmEnd) "Tap again to end" else "End workout") },
-                colors = ChipDefaults.primaryChipColors(backgroundColor = HsColors.Red),
-            )
-        }
     }
 }
