@@ -125,7 +125,7 @@ private fun GaugePage(ui: WorkoutSession.Ui, ambient: Boolean) {
         Duration.Open -> Format.duration(snap.segmentElapsedMs) to "lap"
         null -> Format.duration(snap.totalActiveMs) to "total"
     }
-    val hr = ui.heartRate?.toString() ?: "--"
+    val hr = ui.heartRate?.let { if (ui.hrSuspect) "$it?" else it.toString() } ?: "--"
     val pace = Format.pace(ui.paceSecPerKm)
 
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -215,6 +215,7 @@ private fun AlertBubble(ui: WorkoutSession.Ui, ambient: Boolean) {
     val (text, color) = when {
         snap?.isPaused == true -> "PAUSED" to HsColors.Orange
         snap?.isComplete == true -> "DONE · SWIPE TO SAVE" to HsColors.Green
+        ui.hrSuspect -> "HR UNCERTAIN" to HsColors.Orange
         ui.alerts.visual && ui.alert == TargetStatus.ABOVE ->
             (if (hrMode) "HR HIGH ↑" else "PACE FAST ↑") to HsColors.Red
         ui.alerts.visual && ui.alert == TargetStatus.BELOW ->

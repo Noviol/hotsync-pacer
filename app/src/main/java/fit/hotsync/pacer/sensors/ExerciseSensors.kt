@@ -18,7 +18,10 @@ import androidx.health.services.client.data.ExerciseUpdate
 import androidx.health.services.client.data.LocationAvailability
 import androidx.health.services.client.data.WarmUpConfig
 import fit.hotsync.pacer.WorkoutSession
+import fit.hotsync.pacer.recording.HrSample
+import fit.hotsync.pacer.recording.LocationSample
 import fit.hotsync.pacer.recording.PaceSmoother
+import fit.hotsync.pacer.recording.SampleHistory
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -72,6 +75,9 @@ object ExerciseSensors {
     private val DYNAMICS_NAMES = setOf("Ground Contact Time", "Vertical Oscillation", "Vertical Ratio", "Stride Length")
     private var loggedDynamics = false
 
+    /** Every HR and GPS sample with its measurement time (used when the run is saved). */
+    val history = SampleHistory()
+
     private lateinit var client: ExerciseClient
     private var dataTypes: Set<DataType<*, *>> = emptySet()
     private var gpsEnabled = false
@@ -89,13 +95,18 @@ object ExerciseSensors {
             val m = update.latestMetrics
             val now = SystemClock.elapsedRealtime()
 
-            m.getData(DataType.HEART_RATE_BPM).lastOrNull()?.let {
+            // Batches can hold many samples (screen off): keep them all, with measurement times
+            val bootEpochMs = System.currentTimeMillis() - now
+            val hrPoints = m.getData(DataType.HEART_RATE_BPM)
+            for (p in hrPoints) {
+                val bpm = p.value.toInt()
+                if (bpm > 0) history.addHeartRate(HrSample(bootEpochMs + p.timeDurationFromBoot.toMillis(), bpm))
+            }
+            hrPoints.filter { it.value > 0 }.maxByOrNull { it.timeDurationFromBoot }?.let {
                 val bpm = it.value.toInt()
-                if (bpm > 0) {
-                    WorkoutSession.heartRate = bpm
-                    lastHrAtMs = now
-                    _status.value = _status.value.copy(heartRate = bpm, hr = Lock.READY)
-                }
+                WorkoutSession.heartRate = bpm
+                lastHrAtMs = now
+                _status.value = _status.value.copy(heartRate = bpm, hr = Lock.READY)
             }
             m.getData(DataType.DISTANCE_TOTAL)?.let {
                 WorkoutSession.distanceM = it.total
@@ -103,7 +114,13 @@ object ExerciseSensors {
                 val measuredAt = now - (System.currentTimeMillis() - it.end.toEpochMilli())
                 pace.add(measuredAt.coerceAtMost(now), it.total)
             }
-            m.getData(DataType.LOCATION).lastOrNull()?.let {
+            val locPoints = m.getData(DataType.LOCATION)
+            for (p in locPoints) {
+                val v = p.value
+                history.addLocation(LocationSample(bootEpochMs + p.timeDurationFromBoot.toMillis(),
+                    v.latitude, v.longitude, v.altitude.takeIf { a -> !a.isNaN() }))
+            }
+            locPoints.maxByOrNull { it.timeDurationFromBoot }?.let {
                 val v = it.value
                 location = Location(v.latitude, v.longitude, v.altitude.takeIf { a -> !a.isNaN() }, now)
             }
@@ -189,6 +206,7 @@ object ExerciseSensors {
         dynamics = Dynamics()
         loggedDynamics = false
         lastHrAtMs = 0L
+        history.clear()
         pace.reset()
     }
 

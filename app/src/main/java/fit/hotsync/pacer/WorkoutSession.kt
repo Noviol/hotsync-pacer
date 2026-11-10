@@ -2,11 +2,13 @@ package fit.hotsync.pacer
 
 import android.content.Context
 import android.os.SystemClock
+import fit.hotsync.pacer.recording.CadenceLockDetector
 import fit.hotsync.pacer.recording.LapInfo
 import fit.hotsync.pacer.recording.RunRecording
 import fit.hotsync.pacer.recording.FitWriter
 import fit.hotsync.pacer.recording.RunDataJson
 import fit.hotsync.pacer.recording.TrackPoint
+import fit.hotsync.pacer.recording.TrackResolver
 import fit.hotsync.pacer.sensors.ExerciseSensors
 import fit.hotsync.pacer.upload.UploadQueue
 import kotlinx.coroutines.CoroutineScope
@@ -51,6 +53,7 @@ object WorkoutSession {
         val heartRate: Int? = null,
         val paceSecPerKm: Double? = null,
         val cadenceSpm: Int? = null,         // steps per minute
+        val hrSuspect: Boolean = false,      // HR appears locked to cadence: shown as "?", alerts paused
         val status: TargetStatus = TargetStatus.UNKNOWN,
         val gauge: Double? = null,           // 0..1 pointer position, null = no reading
         val alert: TargetStatus? = null,     // BELOW/ABOVE while an alert is active
@@ -77,6 +80,7 @@ object WorkoutSession {
     private var lastCompletedCount = 0
     private var recording: RunRecording? = null
     private var lastPointAtMs = 0L
+    private val cadenceLock = CadenceLockDetector()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     private val _ui = MutableStateFlow(Ui())
@@ -123,6 +127,7 @@ object WorkoutSession {
         e.start(now(), distanceM)
         recording = RunRecording(System.currentTimeMillis())
         lastPointAtMs = 0L
+        cadenceLock.reset()
         publish(e.snapshot(now()))
     }
 
@@ -141,6 +146,7 @@ object WorkoutSession {
         val t = now()
         if (e.isPaused || t - lastPointAtMs < 1_000) return
         lastPointAtMs = t
+        val suspect = cadenceLock.update(heartRate, ExerciseSensors.cadenceSpm)
         val loc = ExerciseSensors.location?.takeIf { t - it.atElapsedMs < 5_000 }
         val dyn = ExerciseSensors.dynamics
         rec.add(
@@ -157,6 +163,7 @@ object WorkoutSession {
                 verticalOscillationCm = dyn.verticalOscillationCm,
                 verticalRatioPct = dyn.verticalRatioPct,
                 strideLengthM = dyn.strideLengthM,
+                hrSuspect = suspect,
             )
         )
     }
@@ -201,14 +208,19 @@ object WorkoutSession {
         val ui = _ui.value
         if (ui.uploadId != null) return ui.uploadId
         if (rec.points.isEmpty()) return null
+        // Fill every second with the GPS fix and HR actually measured then (batched delivery)
+        val (locations, heartRates) = ExerciseSensors.history.snapshot()
+        val full = RunRecording(rec.startEpochMs).apply {
+            TrackResolver.resolve(rec.points, locations, heartRates).forEach { add(it) }
+        }
         val laps = e.segments.map { seg ->
             LapInfo(seg.index, seg.label + (seg.setText?.let { " $it" } ?: ""), e.completed.getOrNull(seg.index)?.durationMs)
         }
-        val fit = FitWriter.write(rec, laps, includeHeartRate = false)
-        val full = RunDataJson.write(rec, laps)
+        val fit = FitWriter.write(full, laps, includeHeartRate = false)
+        val fullJson = RunDataJson.write(full, laps)
         val id = "hotsync-${rec.startEpochMs}"
         UploadQueue.enqueue(
-            context, id, fit, full,
+            context, id, fit, fullJson,
             UploadQueue.Meta(
                 name = ui.workout?.name ?: "Run",
                 eventId = ui.eventId,
@@ -234,7 +246,10 @@ object WorkoutSession {
             TargetMode.HR -> heartRate?.toDouble()
             TargetMode.PACE -> paceSecPerKm
         }
-        val status = if (snap.isPaused || snap.isComplete) TargetStatus.UNKNOWN else TargetMath.status(target, value)
+        // A cadence-locked HR must not drive alerts or the gauge in HR workouts
+        val hrUnreliable = workout.mode == TargetMode.HR && cadenceLock.locked
+        val status = if (snap.isPaused || snap.isComplete || hrUnreliable) TargetStatus.UNKNOWN
+            else TargetMath.status(target, value)
         val alert = alertTracker.update(status, now(), snap.segmentNumber)
 
         // Buzz whenever a segment ends (including the last one)
@@ -250,7 +265,8 @@ object WorkoutSession {
             paceSecPerKm = paceSecPerKm,
             cadenceSpm = ExerciseSensors.cadenceSpm?.takeIf { it > 0 },
             status = status,
-            gauge = TargetMath.gaugePosition(target, value),
+            gauge = if (hrUnreliable) null else TargetMath.gaugePosition(target, value),
+            hrSuspect = cadenceLock.locked,
             alert = alert.active,
         )
     }

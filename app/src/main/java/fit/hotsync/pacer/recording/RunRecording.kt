@@ -14,6 +14,7 @@ data class TrackPoint(
     val verticalOscillationCm: Double? = null,
     val verticalRatioPct: Double? = null,
     val strideLengthM: Double? = null,
+    val hrSuspect: Boolean = false,  // HR looked locked to cadence at this second
 )
 
 /** Lap info the writer needs from the workout engine. */

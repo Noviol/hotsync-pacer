@@ -32,6 +32,7 @@ object RunDataJson {
             .put("vertical_ratio_pct", stream { it.verticalRatioPct })
             .put("stride_length_m", stream { it.strideLengthM })
             .put("segment", stream { it.segment })
+            .put("hr_suspect", stream { if (it.hrSuspect) true else null })
 
         val lapArray = JSONArray()
         laps.forEach { lap ->
