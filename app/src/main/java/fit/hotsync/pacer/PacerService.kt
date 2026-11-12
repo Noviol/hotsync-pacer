@@ -179,6 +179,9 @@ class PacerService : Service(), WorkoutSession.Feedback {
         if (settings.sound) beep(ToneGenerator.TONE_PROP_BEEP2)
     }
 
+    /** Paused (e.g. triple tap in the rain): always confirm with a distinct buzz. */
+    override fun paused() = vibrate(longArrayOf(0, 70, 70, 70, 70, 260))
+
     override fun segmentChanged(settings: WorkoutSession.AlertSettings) {
         if (settings.haptic) vibrate(longArrayOf(0, 600))
         if (settings.sound) beep(ToneGenerator.TONE_PROP_ACK)

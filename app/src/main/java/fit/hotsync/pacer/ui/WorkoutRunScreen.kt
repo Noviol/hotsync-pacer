@@ -1,6 +1,14 @@
 package fit.hotsync.pacer.ui
 
+import android.os.SystemClock
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -25,6 +33,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -48,6 +58,7 @@ import fit.hotsync.pacer.workout.Duration
 import fit.hotsync.pacer.workout.Format
 import fit.hotsync.pacer.workout.TargetMode
 import fit.hotsync.pacer.workout.TargetStatus
+import fit.hotsync.pacer.workout.TripleTapDetector
 import kotlinx.coroutines.launch
 import kotlin.math.cos
 import kotlin.math.sin
@@ -65,14 +76,27 @@ fun WorkoutRunScreen(ambient: Boolean, onEnded: () -> Unit, onDiscard: () -> Uni
 
     val pager = rememberPagerState { PAGE_COUNT }
     val scope = rememberCoroutineScope()
+    val paused = ui.snapshot?.isPaused == true && !ui.ended
+    // Back on the main page after resuming
+    LaunchedEffect(paused) { if (!paused) pager.scrollToPage(0) }
+    // Triple tap pauses (works on a wet screen, where swipes fail)
+    val tripleTap = remember { TripleTapDetector() }
+    val tapToPause = Modifier.pointerInput(Unit) {
+        detectTapGestures(
+            onLongPress = { tripleTap.reset() },      // sleeve or palm resting: not a tap
+            onTap = { if (tripleTap.tap(SystemClock.uptimeMillis())) WorkoutSession.pause() },
+        )
+    }
     Box(Modifier.fillMaxSize().background(HsColors.Background)) {
         if (ambient) {
             GaugePage(ui, ambient = true)
+        } else if (paused) {
+            PauseScreen(ui, onDiscard = onDiscard)
         } else {
             HorizontalPager(state = pager, modifier = Modifier.fillMaxSize()) { page ->
                 when (page) {
-                    0 -> GaugePage(ui, ambient = false)
-                    1 -> DataPage(ui)
+                    0 -> Box(tapToPause) { GaugePage(ui, ambient = false) }
+                    1 -> Box(tapToPause) { DataPage(ui) }
                     else -> ControlsPage(
                         ui,
                         onDiscard = onDiscard,
@@ -125,7 +149,14 @@ private fun GaugePage(ui: WorkoutSession.Ui, ambient: Boolean) {
         Duration.Open -> Format.duration(snap.segmentElapsedMs) to "lap"
         null -> Format.duration(snap.totalActiveMs) to "total"
     }
-    val hr = ui.heartRate?.let { if (ui.hrSuspect) "$it?" else it.toString() } ?: "--"
+    val hr = ui.heartRate?.toString() ?: "--"
+    // HR stuck on cadence: hold the last trusted number and pulse it softly
+    val hrAlpha = if (ui.hrSuspect && !ambient) {
+        rememberInfiniteTransition(label = "hrPulse").animateFloat(
+            initialValue = 1f, targetValue = 0.35f,
+            animationSpec = infiniteRepeatable(tween(900), RepeatMode.Reverse), label = "hrAlpha",
+        ).value
+    } else 1f
     val pace = Format.pace(ui.paceSecPerKm)
 
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -136,13 +167,13 @@ private fun GaugePage(ui: WorkoutSession.Ui, ambient: Boolean) {
             modifier = Modifier.fillMaxSize().padding(top = 26.dp, bottom = 10.dp, start = 12.dp, end = 12.dp),
         ) {
             if (hrMode) {
-                MetricRow(hr, prefix = "♥", prefixColor = heart, unit = null, size = 40, dim = dim)
+                MetricRow(hr, prefix = "♥", prefixColor = heart, unit = null, size = 40, dim = dim, alpha = hrAlpha)
                 MetricRow(pace, prefix = null, prefixColor = dim, unit = "/km", size = 46, dim = dim)
                 MetricRow(leftValue, prefix = null, prefixColor = dim, unit = leftUnit, size = 46, dim = dim)
             } else {
                 MetricRow(pace, prefix = null, prefixColor = dim, unit = "/km", size = 46, dim = dim)
                 MetricRow(leftValue, prefix = null, prefixColor = dim, unit = leftUnit, size = 46, dim = dim)
-                MetricRow(hr, prefix = "♥", prefixColor = heart, unit = null, size = 30, dim = dim)
+                MetricRow(hr, prefix = "♥", prefixColor = heart, unit = null, size = 30, dim = dim, alpha = hrAlpha)
             }
 
             // Segment name + set count (or zone)
@@ -189,10 +220,66 @@ private fun DataPage(ui: WorkoutSession.Ui) {
     }
 }
 
+/**
+ * Paused: big Resume across the top, the run so far in the middle, Save and
+ * Discard at the bottom. All taps, no swiping or scrolling (works in the rain).
+ */
+@Composable
+private fun PauseScreen(ui: WorkoutSession.Ui, onDiscard: () -> Unit) {
+    val snap = ui.snapshot ?: return
+    var confirmDiscard by remember { mutableStateOf(false) }
+    val avgPace = if (snap.totalDistanceM > 50) snap.totalActiveMs / 1000.0 / (snap.totalDistanceM / 1000) else null
+
+    Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(
+            modifier = Modifier.fillMaxWidth().weight(0.40f)
+                .background(HsColors.Green)
+                .clickable { WorkoutSession.togglePause() },
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("▶  RESUME", color = Color.Black, fontSize = 24.sp, fontWeight = FontWeight.Black,
+                modifier = Modifier.padding(top = 18.dp))
+        }
+        Column(
+            Modifier.fillMaxWidth().weight(0.34f), horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Text(Format.duration(snap.totalActiveMs), color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.Black)
+            Text("${Format.distance(snap.totalDistanceM)}  ·  ${Format.pace(avgPace)} /km",
+                color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            Text(
+                listOfNotNull(snap.segment?.label, snap.segment?.setText).joinToString(" ").ifEmpty { "PAUSED" },
+                color = HsColors.Dim, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Row(
+            Modifier.weight(0.26f).padding(bottom = 22.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top,
+        ) {
+            PauseButton("SAVE", HsColors.Orange) { WorkoutSession.end() }
+            PauseButton(if (confirmDiscard) "SURE?" else "DISCARD", if (confirmDiscard) HsColors.Red else HsColors.Track) {
+                if (confirmDiscard) onDiscard() else confirmDiscard = true
+            }
+        }
+    }
+}
+
+@Composable
+private fun PauseButton(label: String, color: Color, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier.width(80.dp).height(44.dp)
+            .background(color, RoundedCornerShape(22.dp))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(label, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
 /** One big number with an optional small prefix (♥) and unit ("/km", "left"). */
 @Composable
-private fun MetricRow(value: String, prefix: String?, prefixColor: Color, unit: String?, size: Int, dim: Color) {
-    Row(verticalAlignment = Alignment.Bottom) {
+private fun MetricRow(value: String, prefix: String?, prefixColor: Color, unit: String?, size: Int, dim: Color, alpha: Float = 1f) {
+    Row(verticalAlignment = Alignment.Bottom, modifier = Modifier.alpha(alpha)) {
         if (prefix != null) {
             Text(prefix, color = prefixColor, fontSize = (size * 0.5).sp, modifier = Modifier.padding(bottom = (size * 0.12).dp))
             Spacer(Modifier.width(4.dp))
@@ -215,7 +302,6 @@ private fun AlertBubble(ui: WorkoutSession.Ui, ambient: Boolean) {
     val (text, color) = when {
         snap?.isPaused == true -> "PAUSED" to HsColors.Orange
         snap?.isComplete == true -> "DONE · SWIPE TO SAVE" to HsColors.Green
-        ui.hrSuspect -> "HR UNCERTAIN" to HsColors.Orange
         ui.alerts.visual && ui.alert == TargetStatus.ABOVE ->
             (if (hrMode) "HR HIGH ↑" else "PACE FAST ↑") to HsColors.Red
         ui.alerts.visual && ui.alert == TargetStatus.BELOW ->
@@ -288,61 +374,27 @@ private fun WorkoutGauge(position: Double?, ambient: Boolean, hasTarget: Boolean
 @Composable
 private fun ControlsPage(ui: WorkoutSession.Ui, onDiscard: () -> Unit, backToMain: () -> Unit) {
     val snap = ui.snapshot
-    val paused = snap?.isPaused == true
     val complete = snap?.isComplete == true
     val listState = rememberScalingLazyListState()
-    var confirmDiscard by remember { mutableStateOf(false) }
-    LaunchedEffect(paused) { confirmDiscard = false }
 
     ScalingLazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
-        if (!paused) {
+        item {
+            Chip(
+                modifier = Modifier.fillMaxWidth(),
+                onClick = { WorkoutSession.pause() },
+                label = { Text("Pause", fontWeight = FontWeight.Bold) },
+                secondaryLabel = { Text(if (complete) "Then save your workout" else "Or tap the screen 3 times") },
+                colors = ChipDefaults.primaryChipColors(backgroundColor = if (complete) HsColors.Green else HsColors.Orange),
+            )
+        }
+        if (!complete) {
             item {
                 Chip(
                     modifier = Modifier.fillMaxWidth(),
-                    onClick = { WorkoutSession.togglePause() },
-                    label = { Text("Pause", fontWeight = FontWeight.Bold) },
-                    secondaryLabel = { Text(if (complete) "Then save your workout" else "Resume or save next") },
-                    colors = ChipDefaults.primaryChipColors(
-                        backgroundColor = if (complete) HsColors.Green else HsColors.Orange,
-                    ),
-                )
-            }
-            if (!complete) {
-                item {
-                    Chip(
-                        modifier = Modifier.fillMaxWidth(),
-                        onClick = { WorkoutSession.lap(); backToMain() },
-                        label = { Text("Lap") },
-                        secondaryLabel = { Text(snap?.next?.let { "Next: ${it.label}" } ?: "End segment") },
-                        colors = ChipDefaults.secondaryChipColors(),
-                    )
-                }
-            }
-        } else {
-            item {
-                Chip(
-                    modifier = Modifier.fillMaxWidth(),
-                    onClick = { WorkoutSession.togglePause(); backToMain() },
-                    label = { Text("Resume", fontWeight = FontWeight.Bold) },
-                    colors = ChipDefaults.primaryChipColors(backgroundColor = HsColors.Green),
-                )
-            }
-            item {
-                Chip(
-                    modifier = Modifier.fillMaxWidth(),
-                    onClick = { WorkoutSession.end() },
-                    label = { Text("Save", fontWeight = FontWeight.Bold) },
-                    secondaryLabel = { Text("End workout") },
-                    colors = ChipDefaults.primaryChipColors(backgroundColor = HsColors.Orange),
-                )
-            }
-            item {
-                // Two taps, so a stray touch can't throw a run away
-                Chip(
-                    modifier = Modifier.fillMaxWidth(),
-                    onClick = { if (confirmDiscard) onDiscard() else confirmDiscard = true },
-                    label = { Text(if (confirmDiscard) "Tap again to discard" else "Discard") },
-                    colors = ChipDefaults.primaryChipColors(backgroundColor = HsColors.Red),
+                    onClick = { WorkoutSession.lap(); backToMain() },
+                    label = { Text("Lap") },
+                    secondaryLabel = { Text(snap?.next?.let { "Next: ${it.label}" } ?: "End segment") },
+                    colors = ChipDefaults.secondaryChipColors(),
                 )
             }
         }

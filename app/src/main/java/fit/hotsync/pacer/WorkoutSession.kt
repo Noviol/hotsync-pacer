@@ -66,6 +66,7 @@ object WorkoutSession {
     interface Feedback {
         fun outOfRange(status: TargetStatus, settings: AlertSettings)
         fun segmentChanged(settings: AlertSettings)
+        fun paused()
     }
 
     @Volatile var feedback: Feedback? = null
@@ -81,6 +82,7 @@ object WorkoutSession {
     private var recording: RunRecording? = null
     private var lastPointAtMs = 0L
     private val cadenceLock = CadenceLockDetector()
+    private var lastTrustedHr: Int? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     private val _ui = MutableStateFlow(Ui())
@@ -128,6 +130,7 @@ object WorkoutSession {
         recording = RunRecording(System.currentTimeMillis())
         lastPointAtMs = 0L
         cadenceLock.reset()
+        lastTrustedHr = null
         publish(e.snapshot(now()))
     }
 
@@ -147,6 +150,7 @@ object WorkoutSession {
         if (e.isPaused || t - lastPointAtMs < 1_000) return
         lastPointAtMs = t
         val suspect = cadenceLock.update(heartRate, ExerciseSensors.cadenceSpm)
+        if (!suspect && heartRate != null) lastTrustedHr = heartRate
         val loc = ExerciseSensors.location?.takeIf { t - it.atElapsedMs < 5_000 }
         val dyn = ExerciseSensors.dynamics
         rec.add(
@@ -187,6 +191,15 @@ object WorkoutSession {
             scope.launch { ExerciseSensors.pause() }
         }
         publish(e.snapshot(now()))
+    }
+
+    /** Pause (e.g. from a triple tap), with a confirming buzz; no-op if already paused. */
+    @Synchronized
+    fun pause() {
+        val e = engine ?: return
+        if (_ui.value.ended || !e.isStarted || e.isPaused) return
+        togglePause()
+        feedback?.paused()
     }
 
     @Synchronized
@@ -261,7 +274,8 @@ object WorkoutSession {
 
         _ui.value = current.copy(
             snapshot = snap,
-            heartRate = heartRate,
+            // While HR looks locked to cadence, keep showing the last trusted value (the screen pulses it)
+            heartRate = if (cadenceLock.locked) lastTrustedHr ?: heartRate else heartRate,
             paceSecPerKm = paceSecPerKm,
             cadenceSpm = ExerciseSensors.cadenceSpm?.takeIf { it > 0 },
             status = status,
