@@ -12,6 +12,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.wear.compose.foundation.lazy.AutoCenteringParams
 import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
 import androidx.wear.compose.foundation.lazy.items
 import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
@@ -52,7 +53,11 @@ fun HomeScreen(
         timeText = { TimeText() },
         positionIndicator = { PositionIndicator(scalingLazyListState = listState) },
     ) {
-        ScalingLazyColumn(state = listState, modifier = Modifier.crownScroll(listState)) {
+        ScalingLazyColumn(
+            state = listState,
+            modifier = Modifier.crownScroll(listState),
+            autoCentering = AutoCenteringParams(itemIndex = 1),
+        ) {
             item { ListHeader { Text("HotSync") } }
 
             if (!state.paired) {

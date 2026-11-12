@@ -77,8 +77,8 @@ fun WorkoutRunScreen(ambient: Boolean, onEnded: () -> Unit, onDiscard: () -> Uni
     val pager = rememberPagerState { PAGE_COUNT }
     val scope = rememberCoroutineScope()
     val paused = ui.snapshot?.isPaused == true && !ui.ended
-    // Back on the main page after resuming
-    LaunchedEffect(paused) { if (!paused) pager.scrollToPage(0) }
+    // Back on the main page after resuming or pausing
+    LaunchedEffect(paused) { if (!paused || pager.currentPage != 2) pager.scrollToPage(0) }
     // Triple tap pauses (works on a wet screen, where swipes fail)
     val tripleTap = remember { TripleTapDetector() }
     val tapToPause = Modifier.pointerInput(Unit) {
@@ -90,12 +90,10 @@ fun WorkoutRunScreen(ambient: Boolean, onEnded: () -> Unit, onDiscard: () -> Uni
     Box(Modifier.fillMaxSize().background(HsColors.Background)) {
         if (ambient) {
             GaugePage(ui, ambient = true)
-        } else if (paused) {
-            PauseScreen(ui, onDiscard = onDiscard)
         } else {
             HorizontalPager(state = pager, modifier = Modifier.fillMaxSize()) { page ->
                 when (page) {
-                    0 -> Box(tapToPause) { GaugePage(ui, ambient = false) }
+                    0 -> if (paused) PauseScreen(ui) else Box(tapToPause) { GaugePage(ui, ambient = false) }
                     1 -> Box(tapToPause) { DataPage(ui) }
                     else -> ControlsPage(
                         ui,
@@ -221,58 +219,40 @@ private fun DataPage(ui: WorkoutSession.Ui) {
 }
 
 /**
- * Paused: big Resume across the top, the run so far in the middle, Save and
- * Discard at the bottom. All taps, no swiping or scrolling (works in the rain).
+ * Paused: big Resume across the top and the run so far. Deliberately NO Save or
+ * Discard here: a sleeve can still register as taps, so ending a run always
+ * needs a swipe to the controls page.
  */
 @Composable
-private fun PauseScreen(ui: WorkoutSession.Ui, onDiscard: () -> Unit) {
+private fun PauseScreen(ui: WorkoutSession.Ui) {
     val snap = ui.snapshot ?: return
-    var confirmDiscard by remember { mutableStateOf(false) }
     val avgPace = if (snap.totalDistanceM > 50) snap.totalActiveMs / 1000.0 / (snap.totalDistanceM / 1000) else null
 
     Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
-            modifier = Modifier.fillMaxWidth().weight(0.40f)
+            modifier = Modifier.fillMaxWidth().weight(0.48f)
                 .background(HsColors.Green)
                 .clickable { WorkoutSession.togglePause() },
             contentAlignment = Alignment.Center,
         ) {
-            Text("▶  RESUME", color = Color.Black, fontSize = 24.sp, fontWeight = FontWeight.Black,
-                modifier = Modifier.padding(top = 18.dp))
+            Text("▶  RESUME", color = Color.Black, fontSize = 26.sp, fontWeight = FontWeight.Black,
+                modifier = Modifier.padding(top = 22.dp))
         }
         Column(
-            Modifier.fillMaxWidth().weight(0.34f), horizontalAlignment = Alignment.CenterHorizontally,
+            Modifier.fillMaxWidth().weight(0.52f).padding(bottom = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
-            Text(Format.duration(snap.totalActiveMs), color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.Black)
+            Text(Format.duration(snap.totalActiveMs), color = Color.White, fontSize = 34.sp, fontWeight = FontWeight.Black)
             Text("${Format.distance(snap.totalDistanceM)}  ·  ${Format.pace(avgPace)} /km",
                 color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
             Text(
                 listOfNotNull(snap.segment?.label, snap.segment?.setText).joinToString(" ").ifEmpty { "PAUSED" },
                 color = HsColors.Dim, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
+            Spacer(Modifier.height(6.dp))
+            Text("Swipe left to save or discard", color = HsColors.Dim, fontSize = 11.sp)
         }
-        Row(
-            Modifier.weight(0.26f).padding(bottom = 22.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top,
-        ) {
-            PauseButton("SAVE", HsColors.Orange) { WorkoutSession.end() }
-            PauseButton(if (confirmDiscard) "SURE?" else "DISCARD", if (confirmDiscard) HsColors.Red else HsColors.Track) {
-                if (confirmDiscard) onDiscard() else confirmDiscard = true
-            }
-        }
-    }
-}
-
-@Composable
-private fun PauseButton(label: String, color: Color, onClick: () -> Unit) {
-    Box(
-        modifier = Modifier.width(80.dp).height(44.dp)
-            .background(color, RoundedCornerShape(22.dp))
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(label, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
     }
 }
 
@@ -375,10 +355,40 @@ private fun WorkoutGauge(position: Double?, ambient: Boolean, hasTarget: Boolean
 private fun ControlsPage(ui: WorkoutSession.Ui, onDiscard: () -> Unit, backToMain: () -> Unit) {
     val snap = ui.snapshot
     val complete = snap?.isComplete == true
+    val paused = snap?.isPaused == true
     val listState = rememberScalingLazyListState()
+    var confirmDiscard by remember { mutableStateOf(false) }
+    LaunchedEffect(paused) { confirmDiscard = false }
 
     ScalingLazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
-        item {
+        if (paused) {
+            item {
+                Chip(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = { WorkoutSession.togglePause(); backToMain() },
+                    label = { Text("Resume", fontWeight = FontWeight.Bold) },
+                    colors = ChipDefaults.primaryChipColors(backgroundColor = HsColors.Green),
+                )
+            }
+            item {
+                Chip(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = { WorkoutSession.end() },
+                    label = { Text("Save", fontWeight = FontWeight.Bold) },
+                    secondaryLabel = { Text("End workout") },
+                    colors = ChipDefaults.primaryChipColors(backgroundColor = HsColors.Orange),
+                )
+            }
+            item {
+                // Two taps, so a stray touch can't throw a run away
+                Chip(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = { if (confirmDiscard) onDiscard() else confirmDiscard = true },
+                    label = { Text(if (confirmDiscard) "Tap again to discard" else "Discard") },
+                    colors = ChipDefaults.primaryChipColors(backgroundColor = HsColors.Red),
+                )
+            }
+        } else item {
             Chip(
                 modifier = Modifier.fillMaxWidth(),
                 onClick = { WorkoutSession.pause() },
@@ -387,7 +397,7 @@ private fun ControlsPage(ui: WorkoutSession.Ui, onDiscard: () -> Unit, backToMai
                 colors = ChipDefaults.primaryChipColors(backgroundColor = if (complete) HsColors.Green else HsColors.Orange),
             )
         }
-        if (!complete) {
+        if (!complete && !paused) {
             item {
                 Chip(
                     modifier = Modifier.fillMaxWidth(),
