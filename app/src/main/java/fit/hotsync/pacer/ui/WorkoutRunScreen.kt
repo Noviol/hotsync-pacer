@@ -133,7 +133,7 @@ private fun GaugePage(ui: WorkoutSession.Ui, ambient: Boolean) {
     val snap = ui.snapshot ?: return
     val workout = ui.workout ?: return
     val hrMode = workout.mode == TargetMode.HR
-    val dim = if (ambient) Color.Gray else HsColors.Dim
+    val dim = if (ambient) Color(0xFFBBBBBB) else HsColors.Light
     val heart = if (ambient) dim else HsColors.Red
     val segment = snap.segment
 
@@ -162,7 +162,7 @@ private fun GaugePage(ui: WorkoutSession.Ui, ambient: Boolean) {
 
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.fillMaxSize().padding(top = 26.dp, bottom = 10.dp, start = 12.dp, end = 12.dp),
+            modifier = Modifier.fillMaxSize().padding(top = 24.dp, bottom = 8.dp, start = 12.dp, end = 12.dp),
         ) {
             if (hrMode) {
                 MetricRow(hr, prefix = "♥", prefixColor = heart, unit = null, size = 40, dim = dim, alpha = hrAlpha)
@@ -178,14 +178,14 @@ private fun GaugePage(ui: WorkoutSession.Ui, ambient: Boolean) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     segment?.label ?: "Complete",
-                    color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold,
+                    color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold,
                     maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
                     modifier = Modifier.weight(1f, fill = false),
                 )
                 val sub = segment?.setText ?: segment?.target?.zoneName
                 if (sub != null) {
-                    Spacer(Modifier.width(6.dp))
-                    Text(sub, color = dim, fontSize = 14.sp, maxLines = 1)
+                    Spacer(Modifier.width(8.dp))
+                    Text(sub, color = dim, fontSize = 20.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                 }
             }
 
@@ -210,11 +210,11 @@ private fun DataPage(ui: WorkoutSession.Ui) {
         verticalArrangement = Arrangement.Center,
         modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 18.dp),
     ) {
-        MetricRow(ui.cadenceSpm?.toString() ?: "--", prefix = null, prefixColor = HsColors.Dim, unit = "spm", size = 46, dim = HsColors.Dim)
-        MetricRow(Format.distance(snap.totalDistanceM).substringBefore(" "), prefix = null, prefixColor = HsColors.Dim,
-            unit = Format.distance(snap.totalDistanceM).substringAfter(" "), size = 34, dim = HsColors.Dim)
-        MetricRow(Format.duration(snap.totalActiveMs), prefix = null, prefixColor = HsColors.Dim, unit = "time", size = 34, dim = HsColors.Dim)
-        MetricRow(Format.pace(avgPace), prefix = null, prefixColor = HsColors.Dim, unit = "avg /km", size = 34, dim = HsColors.Dim)
+        MetricRow(ui.cadenceSpm?.toString() ?: "--", prefix = null, prefixColor = HsColors.Light, unit = "spm", size = 46, dim = HsColors.Light)
+        MetricRow(Format.distance(snap.totalDistanceM).substringBefore(" "), prefix = null, prefixColor = HsColors.Light,
+            unit = Format.distance(snap.totalDistanceM).substringAfter(" "), size = 34, dim = HsColors.Light)
+        MetricRow(Format.duration(snap.totalActiveMs), prefix = null, prefixColor = HsColors.Light, unit = "time", size = 34, dim = HsColors.Light)
+        MetricRow(Format.pace(avgPace), prefix = null, prefixColor = HsColors.Light, unit = "avg /km", size = 34, dim = HsColors.Light)
     }
 }
 
@@ -245,13 +245,14 @@ private fun PauseScreen(ui: WorkoutSession.Ui) {
         ) {
             Text(Format.duration(snap.totalActiveMs), color = Color.White, fontSize = 34.sp, fontWeight = FontWeight.Black)
             Text("${Format.distance(snap.totalDistanceM)}  ·  ${Format.pace(avgPace)} /km",
-                color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
             Text(
                 listOfNotNull(snap.segment?.label, snap.segment?.setText).joinToString(" ").ifEmpty { "PAUSED" },
-                color = HsColors.Dim, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                color = HsColors.Light, fontSize = 18.sp, fontWeight = FontWeight.Bold,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
-            Spacer(Modifier.height(6.dp))
-            Text("Swipe left to save or discard", color = HsColors.Dim, fontSize = 11.sp)
+            Spacer(Modifier.height(4.dp))
+            Text("Swipe left to save", color = HsColors.Light, fontSize = 15.sp, fontWeight = FontWeight.Bold)
         }
     }
 }
@@ -270,7 +271,7 @@ private fun MetricRow(value: String, prefix: String?, prefixColor: Color, unit: 
         )
         if (unit != null) {
             Spacer(Modifier.width(4.dp))
-            Text(unit, color = dim, fontSize = 13.sp, modifier = Modifier.padding(bottom = (size * 0.14).dp))
+            Text(unit, color = dim, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = (size * 0.12).dp))
         }
     }
 }
@@ -290,13 +291,13 @@ private fun AlertBubble(ui: WorkoutSession.Ui, ambient: Boolean) {
     }
     Box(
         modifier = Modifier
-            .height(24.dp)
-            .background(if (text == null || ambient) Color.Transparent else HsColors.Bubble, RoundedCornerShape(13.dp))
+            .height(28.dp)
+            .background(if (text == null || ambient) Color.Transparent else HsColors.Bubble, RoundedCornerShape(14.dp))
             .padding(horizontal = 14.dp),
         contentAlignment = Alignment.Center,
     ) {
         if (text != null) {
-            Text(text, color = if (ambient) Color.White else color, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            Text(text, color = if (ambient) Color.White else color, fontSize = 16.sp, fontWeight = FontWeight.Bold)
         }
     }
 }
